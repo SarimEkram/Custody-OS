@@ -4,6 +4,7 @@ When a sample physically leaves or returns, it hands a raw scan to `emit`
 (an HTTP post to the scanner in production). `drop_scans` simulates a reader
 that fails, so the agent's "sent" is never confirmed.
 """
+
 from typing import Callable
 
 from fastapi import FastAPI, Header, HTTPException
@@ -19,8 +20,9 @@ class Flaky(BaseModel):
     drop_scans: bool = False
 
 
-def create_app(inventory: dict[str, str], emit: Callable[[dict], None],
-               reader_id: str, location_id: str) -> FastAPI:
+def create_app(
+    inventory: dict[str, str], emit: Callable[[dict], None], reader_id: str, location_id: str
+) -> FastAPI:
     app = FastAPI(title="freezer")
     state = {"drop_scans": False}
 
@@ -28,8 +30,16 @@ def create_app(inventory: dict[str, str], emit: Callable[[dict], None],
         if state["drop_scans"]:
             return False
         try:
-            emit({"reader_id": reader_id, "type": kind, "sample_id": body.sample_id,
-                  "location_id": location_id, "correlation_id": correlation_id, **custody})
+            emit(
+                {
+                    "reader_id": reader_id,
+                    "type": kind,
+                    "sample_id": body.sample_id,
+                    "location_id": location_id,
+                    "correlation_id": correlation_id,
+                    **custody,
+                }
+            )
             return True
         except Exception:  # scanner unreachable: the call still happened, it is just unconfirmed
             return False
@@ -45,8 +55,13 @@ def create_app(inventory: dict[str, str], emit: Callable[[dict], None],
         if inventory.get(body.sample_id) != location_id:
             raise HTTPException(404, f"{body.sample_id} is not stored here")
         del inventory[body.sample_id]
-        emitted = scan("checkout", body, cid, from_custodian=f"location:{location_id}",
-                       to_custodian=body.to_custodian)
+        emitted = scan(
+            "checkout",
+            body,
+            cid,
+            from_custodian=f"location:{location_id}",
+            to_custodian=body.to_custodian,
+        )
         return {"correlation_id": cid, "scan_emitted": emitted}
 
     @app.post("/checkin")

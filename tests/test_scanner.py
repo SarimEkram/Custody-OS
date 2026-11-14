@@ -55,19 +55,29 @@ def test_signature_is_verifiable_hmac_over_the_event(ctx):
     client, store = ctx
     client.post("/scan", json=scan())
     [event] = store.events
-    msg = "|".join([event["scanner_id"], event["type"], event["sample_id"],
-                    event["location_id"], event["correlation_id"],
-                    event["scanned_at"].isoformat()])
+    msg = "|".join(
+        [
+            event["scanner_id"],
+            event["type"],
+            event["sample_id"],
+            event["location_id"],
+            event["correlation_id"],
+            event["scanned_at"].isoformat(),
+        ]
+    )
     expected = "hmac-sha256:" + hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
     assert event["signature"] == expected
 
 
-@pytest.mark.parametrize("bad", [
-    {"reader_id": "scanner:rogue"},                 # unknown reader
-    {"sample_id": "TS-9999"},                       # unknown sample
-    {"location_id": "SEQ-3"},                       # reader is not at that location
-    {"type": "teleport"},                           # not a scan type
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"reader_id": "scanner:rogue"},  # unknown reader
+        {"sample_id": "TS-9999"},  # unknown sample
+        {"location_id": "SEQ-3"},  # reader is not at that location
+        {"type": "teleport"},  # not a scan type
+    ],
+)
 def test_invalid_scans_are_rejected_and_nothing_is_written(ctx, bad):
     client, store = ctx
     r = client.post("/scan", json=scan(**bad))

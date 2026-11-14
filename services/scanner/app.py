@@ -4,6 +4,7 @@ Lab services post raw scans here. The scanner checks them, stamps the time itsel
 signs the event, and stores it. The store is injected: MemoryStore for now, a
 Mongo-backed one (scanner_svc user) once the Atlas URIs exist.
 """
+
 import hashlib
 import hmac
 from datetime import datetime, timezone
@@ -38,9 +39,16 @@ class MemoryStore:
 
 
 def sign(secret: str, event: dict) -> str:
-    msg = "|".join([event["scanner_id"], event["type"], event["sample_id"],
-                    event["location_id"], event["correlation_id"],
-                    event["scanned_at"].isoformat()])
+    msg = "|".join(
+        [
+            event["scanner_id"],
+            event["type"],
+            event["sample_id"],
+            event["location_id"],
+            event["correlation_id"],
+            event["scanned_at"].isoformat(),
+        ]
+    )
     return "hmac-sha256:" + hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
