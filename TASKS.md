@@ -53,7 +53,7 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] Seed bug: scanner `location_id`s fixed in `db/seed.py` and in the live data (`FZ-A`, `SEQ-3`, ...)
 - [x] API accepts C's dashboard request bodies and returns the dashboard's audit fields (`agent/api.py`)
 - [x] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
-- [ ] Install `mongosh`, rehearse beat 4 ("not authorized" / "failed validation")
+- [x] Install `mongosh`, rehearse beat 4 (`db/BEAT4_CHEATSHEET.md`)
 - [ ] Test auditor LLM routing (blocked: B, needs the Groq key)
 - [ ] Gate + verifier end to end with the real agent (blocked: B, needs the agent loop on `execute()`)
 - [ ] Rehearse beats 1–3 with the full system (blocked: B + C)
