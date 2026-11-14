@@ -63,29 +63,31 @@ def backends(**over):
 
 
 def paths(app):
-    return [(r.path, sorted(getattr(r, "methods", []) or [])) for r in app.routes]
+    return set(app.openapi()["paths"])
 
 
 def test_the_service_exposes_b_routes_and_mounts_as_routes_without_clashing():
     service = build_service(backends()[0])
-    have = {p for p, _ in paths(service.app)}
+    have = paths(service.app)
     assert {"/transfers", "/transfers/{transfer_id}/confirm", "/stream", "/audit/gaps"} <= have
 
 
 def test_voice_route_exists_only_when_speech_to_text_is_configured():
-    assert "/voice/requests" not in {p for p, _ in paths(build_service(backends()[0]).app)}
+    assert "/voice/requests" not in paths(build_service(backends()[0]).app)
 
     class STT:
         model_id = "scribe_v3"
 
     with_stt = build_service(backends(stt=STT())[0])
-    assert "/voice/requests" in {p for p, _ in paths(with_stt.app)}
+    assert "/voice/requests" in paths(with_stt.app)
 
 
 def test_b_owns_the_stream_route_so_confirmation_and_courier_events_reach_the_dashboard():
     service = build_service(backends()[0])
-    first = next(r for r in service.app.routes if getattr(r, "path", "") == "/stream")
-    assert first.endpoint.__module__ == "agent.main"  # not A's, which only has change streams
+    with TestClient(service.app).stream("GET", "/stream") as r:
+        # A's version in this test returns JSON; B's is the SSE merge of Atlas + B events
+        assert r.headers["content-type"].startswith("text/event-stream")
+        assert next(r.iter_lines()) == ": connected"
 
 
 def test_merged_stream_delivers_atlas_events_and_b_events_on_one_connection():
@@ -113,12 +115,14 @@ def test_merged_stream_delivers_atlas_events_and_b_events_on_one_connection():
 def test_the_confirm_route_accepts_as_bodys_shape_and_records_through_the_gate():
     b, calls = backends()
     service = build_service(b)
-    asyncio.run(b.store.create_transfer({"_id": "TR-0001", "sample_id": "TS-1042", "from": "FZ-B",
-        "to": "SEQ-3", "requested_by": "user:jlee", "state": "reserved", "history": []}))  # fmt: skip
+    transfer = {"_id": "TR-0001", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3",
+                "requested_by": "user:jlee", "state": "reserved", "history": []}  # fmt: skip
+    asyncio.run(b.store.create_transfer(transfer))
     out = asyncio.run(service.confirmations.request("TR-0001", 4))
     client = TestClient(service.app)
-    r = client.post("/transfers/TR-0001/confirm", json={
-        "user_id": "user:jlee", "readback_text": "whatever the browser sent", "method": "button"})  # fmt: skip
+    body = {"user_id": "user:jlee", "readback_text": "whatever the browser sent",
+            "method": "button"}  # fmt: skip
+    r = client.post("/transfers/TR-0001/confirm", json=body)
     assert r.status_code == 200
     assert calls["recorded"] == [("TR-0001", "user:jlee", out["readback_text"], "button")]
 

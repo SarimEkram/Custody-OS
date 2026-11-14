@@ -176,6 +176,12 @@ async def load_catalog(db) -> Catalog:
     return Catalog(samples=samples, locations=locations)
 
 
+async def load_freezers(db) -> dict[str, set[str]]:
+    """Freezer -> certifications, for choosing where a sample can be returned to."""
+    docs = await db.locations.find({"kind": "freezer"}).to_list()
+    return {d["_id"]: set(d.get("certifications", [])) for d in docs}
+
+
 async def load_courier_travel(db) -> dict[tuple[str, str], float]:
     """Pairwise minutes from locations.travel_minutes, one entry per pair."""
     travel: dict[tuple[str, str], float] = {}
