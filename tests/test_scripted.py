@@ -10,8 +10,13 @@ from tests.test_loop import HAPPY, world
 
 CATALOG = Catalog(
     {"TS-1042": "FZ-B", "TS-1077": "FZ-A", "EV-2201": "FZ-B"},
-    {"FZ-A": "Freezer A", "FZ-B": "Freezer B", "SEQ-3": "Sequencing Station 3", "FOR-LAB": "Forensics Lab"},
-)  # fmt: skip
+    {
+        "FZ-A": "Freezer A",
+        "FZ-B": "Freezer B",
+        "SEQ-3": "Sequencing Station 3",
+        "FOR-LAB": "Forensics Lab",
+    },
+)
 
 
 def run(coro):
