@@ -19,9 +19,7 @@ def ctx():
 
 
 def reserve(client, station="SEQ-3", transfer="TR-1"):
-    return client.post(
-        "/reservations", json={"station_id": station, "transfer_id": transfer}
-    )
+    return client.post("/reservations", json={"station_id": station, "transfer_id": transfer})
 
 
 def test_reserve_returns_held_reservation_with_expiry(ctx):
