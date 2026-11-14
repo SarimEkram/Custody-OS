@@ -171,7 +171,10 @@ def test_shaky_sample_id_is_kept_as_evidence_but_starts_no_transfer():
     voice, _, ledger, requests, store, audio, runs = build(shaky)
     out = submit(voice)
     assert out["transfer_id"] is None and out["low_confidence_terms"] == ["TS-1042"]
-    assert {"field": "sample_id", "value": "TS-1042", "reason": "low_confidence"} in out["problems"]
+    assert any(
+        (p["field"], p["value"], p["reason"]) == ("sample_id", "TS-1042", "low_confidence")
+        for p in out["problems"]
+    )
     req = requests.docs[out["request_id"]]
     assert req["audio_file_id"] in audio.files  # the audio is still the audit trail
     assert store.transfers == {} and ledger.entries == [] and runs == []
