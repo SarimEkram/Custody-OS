@@ -45,9 +45,11 @@ class ConfirmationService:
         catalog: Catalog,
         clock: Callable[[], datetime] = lambda: datetime.now().astimezone(),
         recorder: Callable[[str, str, str, str], Awaitable[None]] | None = None,
+        audio_url: Callable[[str], str] | None = None,
     ) -> None:
         self.store, self.append, self.signals, self.emit = store, append, signals, emit
         self.catalog, self.clock = catalog, clock
+        self.audio_url = audio_url  # text-to-speech on: where the dashboard fetches the MP3
         self.recorder = recorder  # Atlas mode: the gate records the confirmation and unblocks
         self.pending: dict[str, dict] = {}
         self.count = 0
@@ -59,8 +61,10 @@ class ConfirmationService:
         conf_id = f"CONF-{self.count}"
         self.pending[transfer_id] = {"id": conf_id, "text": text}
         self.signals.clear(f"confirm:{transfer_id}")
-        self.emit({"kind": "confirmation_request",
-                   "data": {"id": conf_id, "transfer_id": transfer_id, "text": text}})  # fmt: skip
+        data = {"id": conf_id, "transfer_id": transfer_id, "text": text, "readback_text": text}
+        if self.audio_url:
+            data["audio_url"] = self.audio_url(transfer_id)
+        self.emit({"kind": "confirmation_request", "data": data})
         return {"confirmation_request_id": conf_id, "readback_text": text}
 
     async def confirm(self, transfer_id: str, user_id: str, method: str) -> None:

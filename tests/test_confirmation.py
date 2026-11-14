@@ -71,9 +71,9 @@ def test_request_publishes_the_readback_for_the_dashboard():
 def test_request_carries_an_audio_url_only_when_speech_is_configured():
     events = []
     store = MemoryCustodyStore({}, {"TR-1": dict(TRANSFER)})
+    url = lambda tid: f"/api/transfers/{tid}/readback/audio"  # noqa: E731
     svc = ConfirmationService(store, Ledger().append, Signals(), events.append, CATALOG,
-                              clock=lambda: NOW,
-                              audio_url=lambda tid: f"/api/transfers/{tid}/readback/audio")  # fmt: skip
+                              clock=lambda: NOW, audio_url=url)  # fmt: skip
     run(svc.request("TR-1", eta_minutes=4))
     assert events[0]["data"]["audio_url"] == "/api/transfers/TR-1/readback/audio"
 

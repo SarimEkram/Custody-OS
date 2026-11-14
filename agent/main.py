@@ -91,9 +91,12 @@ class Service:
 def build_service(b: Backends) -> Service:
     hub, signals, notifications = EventHub(), Signals(), []
     applier = ScanApplier(b.apply_scan)
+    speaks = bool(b.tts and b.get_approval)
     confirmations = ConfirmationService(
-        b.store, b.append, signals, hub.publish, b.catalog, recorder=b.confirm_recorder
-    )
+        b.store, b.append, signals, hub.publish, b.catalog, recorder=b.confirm_recorder,
+        # the dashboard reaches the agent through its /api proxy
+        audio_url=(lambda tid: f"/api/transfers/{tid}/readback/audio") if speaks else None,
+    )  # fmt: skip
 
     async def notify(args: dict, ctx) -> dict:
         notifications.append((args["user_id"], args["message"]))
@@ -121,9 +124,7 @@ def build_service(b: Backends) -> Service:
                     runner.start, b.low_logprob)  # fmt: skip
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
-    speech = None
-    if b.tts and b.get_approval:
-        speech = SpokenPrompts(b.tts, confirmations, b.get_approval)
+    speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
     app = create_b_routes(intake, voice, confirmations, speech)
 
     def stream_events() -> AsyncIterator[dict]:
