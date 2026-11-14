@@ -21,7 +21,7 @@ import type {
 } from '../lib/types'
 
 export type View = 'control' | 'auditor' | 'demo'
-export type BackendStatus = 'unknown' | 'up' | 'down'
+export type BackendStatus = 'unknown' | 'up' | 'degraded' | 'down'
 export type StopPhase = 'idle' | 'requested' | 'failed'
 
 const LEDGER_CAP = 500

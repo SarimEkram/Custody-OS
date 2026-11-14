@@ -1,6 +1,7 @@
 // The dashboard against the shapes the REAL backend sends (agent/events.py, agent/confirmation.py,
 // agent/parse.py, agent/audit.py), as found by running the backend's route code.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { checkHealth } from './api'
 import { resolveCourier } from './courier'
 import { findingsFrom } from './findings'
 import { alternativesFrom, needsClarification, problemFields, problemMessages } from './intake'
@@ -130,6 +131,28 @@ describe('clarification from the real intake `problems`', () => {
   it('ignores problems with no suggestions or on unknown fields', () => {
     const r: IntakeResponse = { ...unknown, problems: [{ field: 'window', value: null, reason: 'missing', suggestions: [], message: 'x' }, { field: 'to', value: null, reason: 'missing', suggestions: [], message: 'y' }] }
     expect(alternativesFrom(r)).toEqual([])
+  })
+})
+
+describe('GET /health from the real backend', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const reply = (body: unknown, status = 200) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })))
+
+  it('is up when the backend and its database are healthy', async () => {
+    reply({ status: 'ok', mongo: 'up' })
+    expect(await checkHealth()).toBe('up')
+  })
+
+  it('is degraded when it answers 200 but its database is down (a bare 200 is not healthy)', async () => {
+    reply({ status: 'degraded', mongo: 'down' })
+    expect(await checkHealth()).toBe('degraded')
+  })
+
+  it('is unknown when the endpoint does not exist, and down when unreachable', async () => {
+    reply({}, 404)
+    expect(await checkHealth()).toBe('unknown')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('failed')))
+    expect(await checkHealth()).toBe('down')
   })
 })
 
