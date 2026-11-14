@@ -7,10 +7,11 @@ import asyncio
 import os
 import sys
 
-from pymongo import AsyncMongoClient
 from pymongo.errors import PyMongoError
 
 sys.path.insert(0, ".")
+from agent.db import client as mongo_client  # noqa: E402
+from agent.db import database_name  # noqa: E402
 from scripts._env import load_env  # noqa: E402
 
 USERS = {"agent_svc": "MONGODB_URI_AGENT", "scanner_svc": "MONGODB_URI_SCANNER",
@@ -18,7 +19,7 @@ USERS = {"agent_svc": "MONGODB_URI_AGENT", "scanner_svc": "MONGODB_URI_SCANNER",
 
 
 async def ping(name: str, env: str) -> bool:
-    client = AsyncMongoClient(os.environ[env], serverSelectionTimeoutMS=8000)
+    client = mongo_client(os.environ[env])
     try:
         await client.admin.command("ping")
         print(f"PASS  {name:<12} authenticated and reachable")
@@ -31,11 +32,12 @@ async def ping(name: str, env: str) -> bool:
 
 
 async def inventory() -> None:
-    client = AsyncMongoClient(os.environ["MONGODB_URI_ADMIN"], serverSelectionTimeoutMS=8000)
-    db = client[os.environ.get("MONGODB_DB", "custody")]
+    client = mongo_client(os.environ["MONGODB_URI_ADMIN"])
+    db = client[database_name()]
     try:
         print("\ncollections in", db.name)
-        for info in sorted(await db.list_collections(), key=lambda c: c["name"]):
+        listed = await (await db.list_collections()).to_list()
+        for info in sorted(listed, key=lambda c: c["name"]):
             n = await db[info["name"]].estimated_document_count()
             validated = "validator" if info.get("options", {}).get("validator") else "-"
             print(f"  {info['name']:<22} docs={n:<5} {validated}")
