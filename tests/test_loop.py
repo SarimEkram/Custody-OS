@@ -185,3 +185,35 @@ def test_runaway_model_is_cut_off():
 def test_system_prompt_names_the_blocked_statuses_and_the_no_guessing_rule():
     for word in ("DENIED", "PENDING_APPROVAL", "PENDING_CONFIRMATION", "HALTED", "guess"):
         assert word in SYSTEM_PROMPT
+
+
+# ---- request_confirmation holds the run open until the tech answers (typed requests ended the run before)
+def _readback_world(script, wait_timeout):
+    from agent.signals import Signals
+    loop, llm, ledger, store, ctx, _ = world(script)
+
+    async def readback(args, ctx):
+        return {"readback_text": "I'll check out TS-1042 from Freezer B. Confirm?"}
+
+    loop.executor.internal["request_confirmation"] = readback
+    loop.signals, loop.wait_timeout = Signals(), wait_timeout
+    return loop, llm, store, ctx
+
+
+def test_readback_waits_for_the_tech_then_tells_the_model_it_was_confirmed():
+    script = [say(tc(1, "request_confirmation", summary="plan")), say(content="Proceeding.")]
+    loop, llm, store, ctx = _readback_world(script, wait_timeout=2.0)
+    loop.signals.signal(f"confirm:{ctx.transfer_id}", "confirmed")  # the tech clicked Confirm
+    result = run(loop, "Move TS-1042", ctx)
+    assert result.status == "done"
+    tool_reply = json.loads(llm.seen[1][-1]["content"])
+    assert tool_reply["confirmed_by_tech"] is True
+
+
+def test_readback_with_no_answer_ends_the_run_and_cancels_the_unstarted_transfer():
+    script = [say(tc(1, "request_confirmation", summary="plan")), say(content="should not be reached")]
+    loop, llm, store, ctx = _readback_world(script, wait_timeout=0.05)
+    result = run(loop, "Move TS-1042", ctx)
+    assert result.status == "timeout" and not result.needs_recovery
+    assert len(llm.seen) == 1  # the model was not asked to continue without a confirmation
+    assert asyncio.run(store.get_transfer(ctx.transfer_id))["state"] == "cancelled"

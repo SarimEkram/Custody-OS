@@ -193,6 +193,19 @@ class AgentLoop:
                 content = res.content
                 detail = content if isinstance(content, dict) else {"detail": content}
                 payload = {"status": res.status, "verification": res.verification, **detail}
+                if call.name == "request_confirmation" and res.status == "OK" and self.signals is not None:
+                    # "Read the plan back AND WAIT": the tool returns at once, so without this the model
+                    # treats it as "a human will answer later" and ends the run. For voice requests the gate
+                    # also blocks checkout; typed requests had nothing holding the run open, so a later
+                    # confirmation found no run to resume and the transfer stayed `reserved` forever.
+                    answer = await self.signals.wait(f"confirm:{ctx.transfer_id}", self.wait_timeout)
+                    if answer != "confirmed":
+                        tid = ctx.transfer_id
+                        if (await self.store.get_transfer(tid))["state"] in ("requested", "reserved"):
+                            await self.store.set_state(tid, "cancelled")
+                        return RunResult("timeout", results=results, needs_recovery=False)
+                    payload["confirmed_by_tech"] = True
+                    payload["next"] = "The tech confirmed the read-back. Continue with the plan."
                 reply(c["id"], payload)
                 if res.status == "HALTED":
                     return RunResult("halted", results=results)
