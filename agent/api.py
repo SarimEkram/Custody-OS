@@ -23,7 +23,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from agent import audit
 from agent.control import press_stop, revoke_grant
@@ -34,29 +34,73 @@ router = APIRouter()
 
 
 class ConfirmBody(BaseModel):
+    """C sends {user_id, method}; readback_text is optional."""
     user_id: str
-    readback_text: str
+    readback_text: str | None = None
     method: Literal["button", "voice"] = "button"
 
 
 class ApprovalBody(BaseModel):
-    decided_by: str
-    approve: bool
+    """Accepts {decided_by, approve} (original) or C's {user_id, decision: approved|denied}."""
+    model_config = ConfigDict(populate_by_name=True)
+    decided_by: str = Field(validation_alias=AliasChoices("decided_by", "user_id"))
+    approve: bool | None = None
+    decision: Literal["approved", "denied"] | None = None
     note: str = ""
+
+    @model_validator(mode="after")
+    def _resolve(self) -> "ApprovalBody":
+        if self.approve is None:
+            if self.decision is None:
+                raise ValueError("provide approve (bool) or decision ('approved'|'denied')")
+            self.approve = self.decision == "approved"
+        return self
 
 
 class RevokeBody(BaseModel):
-    by: str
+    """Accepts {by, reason} or C's {user_id}."""
+    model_config = ConfigDict(populate_by_name=True)
+    by: str = Field(validation_alias=AliasChoices("by", "user_id"))
     reason: str = ""
 
 
 class StopBody(BaseModel):
-    by: str
+    """Accepts {by, transfer_id} or C's {user_id, scope, transfer_id}; scope is derived from transfer_id."""
+    model_config = ConfigDict(populate_by_name=True)
+    by: str = Field(validation_alias=AliasChoices("by", "user_id"))
     transfer_id: str | None = None
+    scope: Literal["all", "transfer"] | None = None
 
 
 class AuditQuery(BaseModel):
     question: str
+    user_id: str | None = None  # sent by the dashboard; unused
+
+
+def _dashboard_view(r: dict) -> dict:
+    """Fields C's AuditResult type reads: answer, mode, entries, scans, requests, gaps."""
+    rows, route = r["rows"], r["route"]
+    if route == "restricted_without_supervisor":
+        v, b = rows["violations"], rows["blocked_attempts"]
+        answer = f"{len(v)} restricted move(s) without a supervisor; {len(b)} blocked attempt(s)."
+        flat = v + b
+    elif route == "exposure_report":
+        answer = f"{len(rows)} sample(s) with time out of storage."
+        flat = rows
+    else:
+        flat = rows
+        answer = f"{len(flat)} matching record(s)."
+    is_scan = lambda x: x.get("entry_type") == "scan"  # noqa: E731
+    entries = [x for x in flat if "entry_type" in x and not is_scan(x)]
+    requests = [x["request"] for x in flat if isinstance(x.get("request"), dict)]
+    seen, uniq = set(), []
+    for q in requests:
+        if q.get("_id") not in seen:
+            seen.add(q.get("_id"))
+            uniq.append(q)
+    return {"answer": answer, "mode": "semantic" if route == "semantic" else "canned", "entries": entries,
+            "scans": [x for x in flat if is_scan(x)], "requests": uniq,
+            "gaps": flat if route == "gaps" else []}
 
 
 def _http(e: Exception) -> HTTPException:
@@ -67,7 +111,8 @@ def _http(e: Exception) -> HTTPException:
 @router.post("/transfers/{transfer_id}/confirm")
 async def confirm(transfer_id: str, body: ConfirmBody):
     try:
-        lid = await confirm_readback(transfer_id, body.user_id, body.readback_text, body.method)
+        text = body.readback_text or f"Read-back confirmed for {transfer_id}"
+        lid = await confirm_readback(transfer_id, body.user_id, text, body.method)
     except (ValueError, PermissionError) as e:
         raise _http(e) from e
     return {"ok": True, "ledger_id": str(lid)}
@@ -76,7 +121,7 @@ async def confirm(transfer_id: str, body: ConfirmBody):
 @router.post("/approvals/{approval_id}")
 async def approval(approval_id: str, body: ApprovalBody):
     try:
-        return jsonable(await decide_approval(approval_id, body.decided_by, body.approve, body.note))
+        return jsonable(await decide_approval(approval_id, body.decided_by, bool(body.approve), body.note))
     except (ValueError, PermissionError) as e:
         raise _http(e) from e
 
@@ -106,7 +151,9 @@ async def stream():
 
 @router.post("/audit/query")
 async def audit_query(body: AuditQuery):
-    return await audit.ask(body.question)
+    """Returns A's {route, params, routed_by, rows} plus the dashboard's {answer, mode, entries, scans, ...}."""
+    r = await audit.ask(body.question)
+    return {**r, **_dashboard_view(r)}
 
 
 @router.get("/audit/chain/{sample_id}")

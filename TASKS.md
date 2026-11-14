@@ -25,7 +25,7 @@ Who is waiting on whom. Remove a line once it's resolved.
 | A | B + C | Running services and dashboard, to rehearse demo beats 1–3 |
 | A | C | Auditor panel calling `/api/audit/*`, to check the results look right on screen |
 | B | A + C | Agree a time for the first live end-to-end run (it needs `python -m db.seed --reset`, which resets everyone's data) |
-| B | C | Seed fix: `identities` scanner readers have `location_id` typos (`FZA`, `SEQ3`…; should be `FZ-A`, `SEQ-3`…). B works around it in `services/config.py`; fix the seed. Also agree `DEMO_SPEED` |
+| B | C | Agree `DEMO_SPEED` (seed `location_id` typos are fixed by A: B can drop the workaround in `services/config.py`) |
 
 ---
 
@@ -49,9 +49,11 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] Docs updated to match the real cluster; `HANDOFF_A.md`
 
 **To do**
-- [ ] Watcher also unblocks a transfer when an approval changes directly in the DB (safety net)
-- [ ] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
-- [ ] Install `mongosh`, rehearse beat 4 ("not authorized" / "failed validation")
+- [x] Watcher also unblocks a transfer when an approval changes directly in the DB (safety net)
+- [x] Seed bug: scanner `location_id`s fixed in `db/seed.py` and in the live data (`FZ-A`, `SEQ-3`, ...)
+- [x] API accepts C's dashboard request bodies and returns the dashboard's audit fields (`agent/api.py`)
+- [x] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
+- [x] Install `mongosh`, rehearse beat 4 (`db/BEAT4_CHEATSHEET.md`)
 - [ ] Test auditor LLM routing (blocked: B, needs the Groq key)
 - [ ] Gate + verifier end to end with the real agent (blocked: B, needs the agent loop on `execute()`)
 - [ ] Rehearse beats 1–3 with the full system (blocked: B + C)
