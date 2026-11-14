@@ -159,19 +159,31 @@ export interface ParsedRequest {
   window_start?: string | null
 }
 
+/** One thing the backend could not validate in a request (agent/parse.py). */
+export interface IntakeProblem {
+  field: string // sample_id | from | to
+  value: string | null
+  reason: string // unknown_sample | unknown_location | low_confidence | missing | sample_not_at_source | same_as_source
+  suggestions: string[]
+  message: string
+}
+
 // POST /voice/requests and POST /transfers return the same shape.
-// `alternatives` is an optional backend extension for "did you mean" prompts.
+// The backend explains what it could not validate in `problems`. `alternatives` is the older mock-only form.
 export interface IntakeResponse {
   request_id: string
   transcript: string
   parsed: ParsedRequest
   low_confidence_terms: string[]
   transfer_id: string | null
+  problems?: IntakeProblem[]
   alternatives?: { field: 'sample_id' | 'from' | 'to'; options: string[] }[]
   error?: string | null
 }
 
 export interface ConfirmationRequest {
+  /** Backend sends {id, transfer_id, text}; the normalizer exposes the sentence as `readback_text`. */
+  id?: string
   transfer_id: string
   readback_text: string
   sample_id?: string
@@ -182,11 +194,27 @@ export interface ConfirmationRequest {
   audio_url?: string | null
 }
 
+/** What the backend sends: where the courier is as a fraction of its current leg, not coordinates. */
+export interface CourierSignal {
+  transfer_id: string
+  progress: number
+  from?: string
+  to?: string
+  /** Optional: some backends/mocks send coordinates directly. */
+  x?: number
+  y?: number
+  job_id?: string
+  sample_id?: string
+}
+
+/** Where the dashboard draws the courier (map coordinates), resolved from a CourierSignal. */
 export interface CourierPosition {
   transfer_id: string
   x: number
   y: number
   progress: number
+  /** Where a recovery leg began, remembered because the backend reports `from === to` for it. */
+  recoveryStart?: { x: number; y: number }
 }
 
 export type StreamEvent =
@@ -195,7 +223,7 @@ export type StreamEvent =
   | { kind: 'scan'; data: ScanEvent }
   | { kind: 'approval'; data: Approval }
   | { kind: 'confirmation_request'; data: ConfirmationRequest }
-  | { kind: 'courier_position'; data: CourierPosition }
+  | { kind: 'courier_position'; data: CourierSignal }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
@@ -225,11 +253,26 @@ export interface VoiceRequestDoc {
   created_at: string
 }
 
+/** A summary row from an audit query. These are projections, not full ledger entries. */
+export type AuditRow = Record<string, unknown>
+
 export interface AuditResult {
   answer?: string | null
   mode?: 'canned' | 'semantic'
+  route?: string
   entries: LedgerEntry[]
   scans?: ScanEvent[]
   requests?: VoiceRequestDoc[]
-  gaps?: LedgerEntry[]
+  /** Irreversible actions that were sent but never scanned. Rows have only a few fields. */
+  gaps?: AuditRow[]
+  /** The raw rows; for the exposure report these are per-sample aggregates. */
+  rows?: unknown
+}
+
+/** GET /audit/requests/{id}/verify */
+export interface AudioVerification {
+  request_id: string
+  has_audio: boolean
+  sha256?: string
+  matches?: boolean
 }

@@ -67,3 +67,25 @@ async def test_audit_query_has_dashboard_fields(client):
     r = (await client.post("/audit/query", json={"question": "Show every restricted move without a supervisor"})).json()
     assert r["route"] == "restricted_without_supervisor" and "0 restricted move" in r["answer"]
     assert any(e["decision"] in ("deny", "pending_approval") for e in r["entries"])  # beat-2 blocked attempt
+
+
+async def test_health_and_state(client):
+    h = (await client.get("/health")).json()
+    assert h == {"status": "ok", "mongo": "up"}
+    st = (await client.get("/state")).json()
+    for key in ("transfers", "ledger", "scans", "approvals", "samples", "locations", "grants",
+                "demo_scripted", "demo_speed"):
+        assert key in st, key
+    assert {s["_id"] for s in st["samples"]} >= {"TS-1042", "EV-2201", "TS-1077"}
+    assert len(st["locations"]) == 5 and st["grants"][0]["_id"]
+    assert all("embedding" not in row for row in st["ledger"])
+    stamps = [row["timestamp"] for row in st["ledger"]]
+    assert stamps == sorted(stamps)  # oldest first
+    assert isinstance(st["demo_scripted"], bool) and st["demo_speed"] > 0
+
+
+async def test_audit_chain_includes_original_request(client):
+    r = (await client.post("/audit/query", json={"question": "What happened to TS-1042?"})).json()
+    assert [q["_id"] for q in r["requests"]] == ["VR-0001"]  # seeded history: the typed request
+    assert r["requests"][0]["transcript"].startswith("Move TS-1042")
+    assert "words" not in r["requests"][0]

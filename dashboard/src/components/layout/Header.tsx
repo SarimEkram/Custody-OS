@@ -13,6 +13,7 @@ const NAV: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
 export function ConnectionBadge() {
   const connection = useCustodyStore((s) => s.connection)
   const backend = useCustodyStore((s) => s.backend)
+  if (connection === 'connected' && backend === 'degraded') return <Badge tone="warn" label="Live, database down" title="The event stream is connected but the backend reports its database is down" />
   if (connection === 'connected') return <Badge tone="ok" label="Live" title={`Event stream connected. Backend: ${backend}`} />
   if (connection === 'disconnected') return <Badge tone="bad" label="Backend offline" title="Cannot reach the agent service" />
   return <Badge tone="warn" label={connection === 'connecting' ? 'Connecting' : 'Reconnecting'} />
