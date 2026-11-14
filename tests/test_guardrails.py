@@ -410,3 +410,15 @@ def test_an_aborted_run_goes_to_the_recovery_planner(status):
 
     out = asyncio.run(Runner(AbortLoop(), Planner(), store, Requests("go")).run("TR-1"))
     assert Planner.calls == 1 and out.recovery == "cancelled"
+
+
+# ------------------------------------------------------------ the ledger row for an aborted run
+def test_an_aborted_run_is_written_as_a_violation_row_the_ledger_validator_accepts():
+    ctx = LoopContext("agent:custody-01", "user:jlee", "G", "TR-1", "VR-1", refs={"sample_id": "TS-1042"})
+    row = guardrails.abort_entry(ctx, "budget", "lookup_sample was called more than 3 times")
+    required = json.load(open("db/validators/ledger.json"))["$jsonSchema"]["required"]
+    assert all(k in row for k in required)
+    assert row["entry_type"] == "violation" and row["rule_hits"] == ["budget"]
+    assert row["actor"].startswith("system:") and row["on_behalf_of"] == "user:jlee"
+    assert row["transfer_id"] == "TR-1" and row["sample_id"] == "TS-1042"
+    assert isinstance(row["policy_version"], int) and "more than 3" in row["summary"]
