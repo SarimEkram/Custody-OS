@@ -141,3 +141,62 @@ def test_llm_parser_raises_when_the_model_makes_no_tool_call():
 
     with pytest.raises(ParseFailed):
         asyncio.run(llm_parser(LLM(), CATALOG)(TEXT))
+
+
+# ---- the model may leave unsaid fields out (a required `window` made Groq reject the call -> HTTP 500)
+def test_parse_request_schema_lets_the_model_leave_fields_out():
+    seen = {}
+
+    class LLM:
+        async def chat(self, messages, tools):
+            seen["required"] = tools[0]["function"]["parameters"]["required"]
+            return {"role": "assistant", "content": None, "tool_calls": None}
+
+    with pytest.raises(ParseFailed):
+        asyncio.run(llm_parser(LLM(), CATALOG)(TEXT))
+    assert seen["required"] == []  # the parser's copy only; the shared catalogue is unchanged
+    from agent.tool_catalogue import openai_tools
+    shared = {t["function"]["name"]: t["function"]["parameters"] for t in openai_tools()}
+    assert shared["parse_request"]["required"]  # not mutated by the parser
+    assert shared["checkout_sample"]["required"]
+
+
+def test_llm_parser_fills_an_unsaid_source_from_where_the_sample_is_stored():
+    call = {"id": "1", "type": "function", "function": {
+        "name": "parse_request", "arguments": json.dumps({"sample_id": "TS-1042", "to": "SEQ-3"})}}  # fmt: skip
+
+    class LLM:
+        async def chat(self, messages, tools):
+            return {"role": "assistant", "content": None, "tool_calls": [call]}
+
+    parsed = asyncio.run(llm_parser(LLM(), CATALOG)("Move TS-1042 to Sequencing Station 3"))
+    assert parsed == {"sample_id": "TS-1042", "to": "SEQ-3", "from": "FZ-B"}
+
+
+def test_llm_parser_does_not_invent_a_source_for_an_unknown_sample():
+    call = {"id": "1", "type": "function", "function": {
+        "name": "parse_request", "arguments": json.dumps({"sample_id": "TS-9999", "to": "SEQ-3"})}}  # fmt: skip
+
+    class LLM:
+        async def chat(self, messages, tools):
+            return {"role": "assistant", "content": None, "tool_calls": [call]}
+
+    assert "from" not in asyncio.run(llm_parser(LLM(), CATALOG)("Move TS-9999 to Sequencing Station 3"))
+
+
+def test_a_rejected_model_call_becomes_a_clarification_not_a_server_error():
+    from agent.llm import LLMError
+
+    class LLM:
+        async def chat(self, messages, tools):
+            raise LLMError('LLM returned 400: {"error":{"message":"Tool call validation failed: ..."}}')
+
+    with pytest.raises(ParseFailed):
+        asyncio.run(llm_parser(LLM(), CATALOG)(TEXT))
+
+    class Down:
+        async def chat(self, messages, tools):
+            raise LLMError("rate limit (429) after one retry")
+
+    with pytest.raises(LLMError):  # a real outage is still reported as an outage
+        asyncio.run(llm_parser(Down(), CATALOG)(TEXT))
