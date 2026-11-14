@@ -46,7 +46,7 @@ export function localAudit(question: string, ev: LocalEvidence): AuditResult {
 
   if (q.includes('gap')) {
     const gaps = findGaps(ev.ledger, ev.scans)
-    return { mode: 'canned', answer: `${note} ${gaps.length} irreversible action(s) were sent without a matching scan.`, entries: gaps, gaps, scans: ev.scans }
+    return { mode: 'canned', answer: `${note} ${gaps.length} irreversible action(s) were sent without a matching scan.`, entries: gaps, scans: ev.scans }
   }
   if (q.includes('without') && (q.includes('supervisor') || q.includes('approval'))) {
     const rows = restrictedWithoutSupervisor(ev)

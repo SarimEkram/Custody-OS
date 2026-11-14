@@ -24,7 +24,7 @@ src/app/         App + AppShell (error boundary, offline banner, stream hook)
 src/pages/       ControlCenter, AuditorPage, DemoPage
 src/components/  layout, command (mic, typed box, read-back), map, workflow, ledger, approvals, auditor, demo, ui
 src/hooks/       useEventStream (one SSE connection, backoff, resync), useMediaRecorder, useNow, useAgentStatus
-src/lib/         api.ts (only REST module), types.ts, normalize.ts, format.ts, auditLocal.ts, seed.ts
+src/lib/         api.ts (only REST module), types.ts, normalize.ts, format.ts, courier.ts, intake.ts, findings.ts, rules.ts, authority.ts, auditLocal.ts, seed.ts
 src/store/       custodyStore.ts (Zustand; mirrors backend state, never decides authorization)
 ```
 
@@ -36,36 +36,52 @@ A production build (`npm run build`) is not affected.
 
 ## Integration status
 
-Verified here: `tsc`, `oxlint` (warnings only), `vitest` (31 tests), `vite build`.
-**Not verified:** nothing has been run against a live backend, and the UI has not been exercised in a browser yet.
+**How this was checked.** The backend's real route code on `main` (Person B's intake, confirm and stream routes,
+Person A's router) was run in memory with only the database calls faked and every database address pointed at a
+dead port, so Atlas was never contacted. This dashboard was then driven in a real browser against it. Result:
+**23 of 26 behaviours work.** The 3 that don't are waiting on backend work (below). What this does *not* cover:
+the agent loop, the lab services, Atlas itself, and real change-stream events (those were sent in with the shapes
+the backend code produces).
 
-| Feature | Status |
+| Feature | Status against the real backend |
 |---|---|
-| Typed request `POST /transfers` | Implemented, awaiting backend. Body assumed `{text, user_id}` |
-| Voice `POST /voice/requests` (multipart `audio`, `user_id`) | Implemented per contract, awaiting backend |
-| Read-back `POST /transfers/{id}/confirm` | Implemented, awaiting backend |
-| Approvals `POST /approvals/{id}` | Implemented, awaiting backend. Never optimistic: waits for the SSE `approval` event |
-| Stop `POST /control/stop`, revoke `POST /grants/{id}/revoke` | Implemented, awaiting backend. Halt is shown only when the backend reports it |
-| SSE `GET /stream` (ledger, transfer, scan, approval, confirmation_request, courier_position) | Implemented, awaiting backend. Dedupes by id, auto-reconnects |
-| Auditor `POST /audit/query` | Implemented, awaiting backend. Falls back to the live in-memory ledger, clearly labelled |
-| Exposure clock (counts up toward the limit) | Implemented. Starts only from a scanner `checkout` event; keeps running through recovery until a scanner `checkin` |
-| Map | Implemented. Sample positions change only on scanner events |
-| Demo Director | Scenarios run as typed requests. Reset shows the documented command only |
-| Original audio playback | Implemented, awaiting `GET /voice/requests/{id}/audio` |
-| Read-back TTS | Plays `audio_url` if the backend sends one; text read-back always works |
+| Typed request `POST /transfers`, spoken request `POST /voice/requests` | Works (voice verified at the request-format level) |
+| Read-back card and `POST /transfers/{id}/confirm` | Works. The sentence comes from the event's `text` |
+| Approve / Deny, Stop, Revoke | Work at the route level. Never optimistic: the UI waits for the SSE update |
+| "Did you mean...?" and unclear requests | Work. Uses `problems[].suggestions` and `message`, with a fallback for sparse problems |
+| Live map and courier dot | Works on the outbound and recovery legs, placed from `progress` (see below) |
+| Live ledger, scanner proof, exposure clock | Work. Position and clock change only on scanner events |
+| Auditor: custody chain, gaps, exposure report | Work. Summary rows are shown as findings. The original request is fetched from `/audit/transfer/{id}` |
+| Audio integrity | Works: "Verify now" calls `/audit/requests/{id}/verify`. The dashboard never claims a hash result itself |
+| Refused request (no active grant) | Works. Explained, with Restore authority for the grant holder or a switch for anyone else |
+| Gate denial (e.g. `destination_not_certified`) | Works. Plain-language reason and next step from `src/lib/rules.ts` |
+| Reload / reconnect resync | **Waiting on the backend** (`GET /state`) |
+| Restore authority | **Waiting on the backend** (`POST /grants/{id}/reissue`) |
+| Audio playback | **Waiting on the backend** (`GET /voice/requests/{id}/audio`) |
 
-## Backend requirements (for the teammates who own those parts)
+## What the backend still needs to provide
 
-1. **`GET /state`** returning `{transfers, ledger, scans, approvals, samples, locations, grants, demo_scripted, demo_speed}` so the UI can resync after an SSE reconnect and load locations/samples/max_minutes_out. Without it the UI uses seed reference data for map layout and exposure limits.
-2. **`GET /health`** for the backend-health indicator.
-3. **SSE framing:** default (unnamed) messages whose body is `{"kind": ..., "data": ...}`. Ledger entries need a stable `_id`; scans should include `correlation_id`.
-4. **`courier_position`** x/y in the same 760×420 map coordinates as `locations.map`.
-5. **`/transfers` typed body** and the **`confirmation_request`** payload (`readback_text`, optional `estimated_arrival`, `audio_url`) need confirming with Person B.
-6. **`/audit/query`** response shape `{answer, mode, entries, scans, requests, gaps}` plus `audio_verified` on request docs if integrity was actually re-checked.
-7. **Demo identity:** the switcher sends `user_id` with each call. The backend must authorize from it and reject unauthorized approvals.
-8. **Exposure `response`** fields `minutes_out` and `exceeded`; recovery entries should carry `freezer_id` so the map can show the return freezer.
-9. **Halting while a read-back or approval is pending.** `POST /transfers/{id}/confirm` (and `/approvals/{id}`) on a halted or finished transfer must return a non-2xx with a readable `detail` (the mock returns `409`), not silently succeed. The halted transfer's `transfer` event should clear `blocked_reason`. The dashboard also times out any pending confirm/approve after 8 s, so a missing response never leaves a button spinning.
-10. New requests under a revoked grant should be denied by the gate (a `deny` decision with a rule hit), with no lab call made.
-11. **Revoked authority.** There is no grant event on the stream, so the dashboard decides the agent has no authority from ledger evidence: a `halt` or `deny` entry whose `rule_hits` include `grant_revoked`, `grant_expired` or `grant_missing`, until the gate next allows the agent to act. The `stop_switch` rule is deliberately not treated as lost authority. Denials are explained from `rule_hits` (see `src/lib/rules.ts`), so new gate rules should be added there. If grants ever stream (or `GET /state` returns `grants`), that status is used too.
-12. **Restoring authority (new).** `POST /grants/{id}/reissue` `{by, reason}`: issues a NEW grant, supervisor only, never the agent, scope copied (never widened), server-set expiry, reason recorded in the ledger. The full contract and security rules for Person A are in `GRANT_REISSUE_SPEC.md`. The dashboard's **Restore authority** button needs it; without it the dialog says so and points at the demo reset.
-13. A server-provided simulated clock if `DEMO_SPEED` is used. The browser does not convert time.
+1. **`GET /state`** returning `{transfers, ledger, scans, approvals, samples, locations, grants}`. Change streams only
+   send new changes, so without it a page reload empties the dashboard (the active transfer, a waiting read-back
+   and the activity list are lost). `samples` should carry `max_minutes_out`. It is also how grants would reach the UI.
+2. **`courier_position` leg start.** The event carries `{job_id, transfer_id, sample_id, from, to, progress}`. After a
+   "back to origin" reroute the courier service reports `from === to` with progress restarting at 0. The dashboard
+   copes by remembering where it last drew the courier, but a reload mid-recovery loses that. Adding the leg's
+   start (e.g. `leg_from`) or `x`/`y` to the event would remove the guesswork.
+3. **`POST /grants/{id}/reissue`** `{by, reason}`: see `GRANT_REISSUE_SPEC.md` (supervisor only, never the agent, new
+   grant rather than reactivation, scope copied, server-set expiry, ledgered as `grant_reissued`).
+4. **`GET /voice/requests/{id}/audio`** to stream the stored recording.
+5. **`GET /health`** for the status indicator (optional; the UI shows "unknown" without it).
+
+## Behaviour the dashboard relies on (already true on `main`)
+
+- Confirm / approve on a halted or finished transfer returns a non-2xx with a readable `detail`. The UI also times out
+  any pending confirm or approve after 8 s, so a missing reply never leaves a button spinning.
+- A request from someone with no active grant is refused with `403` before anything is stored, so no ledger row exists.
+  The dashboard treats that refusal, for the person who holds the grant, as "the agent has no authority" (it clears
+  when a request is accepted or a grant is re-issued). Only the grant holder (Jordan Lee) can send requests.
+- Ledger evidence of lost authority: a `halt` or `deny` entry whose `rule_hits` include `grant_revoked`,
+  `grant_expired` or `grant_missing`. `stop_switch` is deliberately not treated as lost authority.
+- New gate rules should get a plain-language entry in `src/lib/rules.ts`; unknown rules still display, just less friendly.
+- Audit rows: `gaps` rows have only `transfer_id, sample_id, tool, timestamp, on_behalf_of, correlation_id, summary`
+  and the exposure report returns per-sample aggregates. Both are shown as findings, not ledger rows.

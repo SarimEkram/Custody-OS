@@ -49,6 +49,7 @@ function fresh() {
     requests: {},
     runs: [],
     grantSeq: 8,
+    conf: 0,
     grants: {
       'GRANT-0007': {
         _id: 'GRANT-0007',
@@ -171,7 +172,7 @@ const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k 
 
 // Moves the courier along points, emitting courier_position ticks (in memory/SSE only).
 // totalMs is spread across segments in proportion to their length.
-async function travel(ctx, points, totalMs, interruptible) {
+async function travel(ctx, points, totalMs, interruptible, leg) {
   const lens = points.slice(1).map((p, i) => Math.hypot(p.x - points[i].x, p.y - points[i].y))
   const sum = lens.reduce((x, y) => x + y, 0) || 1
   let covered = 0
@@ -182,7 +183,8 @@ async function travel(ctx, points, totalMs, interruptible) {
       else await sleep(400)
       const p = lerp(points[i], points[i + 1], k / ticks)
       ctx.pos = p
-      broadcast('courier_position', { transfer_id: ctx.t._id, x: p.x, y: p.y, progress: (covered + lens[i] * (k / ticks)) / sum })
+      // Same payload the real CourierTicker publishes: job + the leg's from/to + progress. No coordinates.
+      broadcast('courier_position', { job_id: 'CJ-208', transfer_id: ctx.t._id, sample_id: ctx.t.sample_id, from: leg.from, to: leg.to, progress: (covered + lens[i] * (k / ticks)) / sum })
     }
     covered += lens[i]
   }
@@ -217,6 +219,12 @@ async function run(ctx) {
       return
     }
     await ctx.step(600)
+    // Gate check 5 (agent/policy_gate.py): the destination must hold the certification the sample needs.
+    if (sample.restriction === 'forensic' && !loc(t.to).certifications.includes('FORENSIC')) {
+      led(ctx, { tool: 'reserve_station', reversible: true, decision: 'deny', rule_hits: ['destination_not_certified'], reason: `${t.to} is not certified for ${t.sample_id}`, summary: `Denied: ${loc(t.to).name} is not certified for forensic evidence. Nothing was sent to any lab system.` })
+      setTransfer(t, { state: 'cancelled' })
+      return
+    }
     await tool(ctx, 'lookup_sample', { reversible: null, reason: 'Resolve sample and current location.', args: { sample_id: t.sample_id }, summary: `looked up ${t.sample_id} for ${t.requested_by.replace('user:', '')}` })
     await tool(ctx, 'reserve_station', { reversible: true, reason: `Hold ${to} for the arrival window.`, args: { station_id: t.to }, summary: `reserved ${t.to}` })
     await tool(ctx, 'request_courier', { reversible: true, reason: `Courier needed ${t.from} to ${t.to}.`, args: { from: t.from, to: t.to }, summary: 'requested a courier' })
@@ -226,14 +234,11 @@ async function run(ctx) {
     // Read-back gate (irreversible step ahead).
     led(ctx, { tool: 'checkout_sample', reversible: false, decision: 'pending_confirmation', rule_hits: ['readback_required'], summary: 'Checkout is waiting for the technician to confirm the read-back.', reason: 'Voice/typed requests need a read-back before the first irreversible step.' })
     setTransfer(t, { state: 'blocked', blocked_reason: 'readback_pending' })
+    ctx.pendingConfirm = { id: `CONF-${++S.conf}` }
     broadcast('confirmation_request', {
+      id: ctx.pendingConfirm.id,
       transfer_id: t._id,
-      sample_id: t.sample_id,
-      from: t.from,
-      to: t.to,
-      readback_text: `I'll check out ${t.sample_id} from ${from} and send it to ${to}, arriving about 2:04. Confirm?`,
-      requested_arrival: '2:00 PM',
-      estimated_arrival: '2:04 PM',
+      text: `I'll check out ${t.sample_id} from ${from} and send it to ${to}, arriving about 2:04. Confirm?`,
     })
     await ctx.until(new Promise((res) => (ctx.waiters.confirm = res)))
     led(ctx, { entry_type: 'confirmation', tool: null, summary: `${t.requested_by.replace('user:', '')} confirmed the read-back by button.`, response: { readback_text: `Check out ${t.sample_id} to ${to}`, confirmed_by: t.requested_by, method: 'button' } })
@@ -274,7 +279,7 @@ async function run(ctx) {
 
     await tool(ctx, 'handoff_to_courier', { reversible: false, reason: 'Courier on site; hand the sample over.', args: { transfer_id: t._id }, summary: `handed ${t.sample_id} to the courier`, scan: { type: 'handoff', at: t.from, from: `location:${t.from}`, to: 'courier:CJ-208' } })
     setTransfer(t, { state: 'in_transit' })
-    await travel(ctx, route(t), 12000, true)
+    await travel(ctx, route(t), 12000, true, { from: t.from, to: t.to })
 
     await tool(ctx, 'deliver', { reversible: false, reason: 'Courier arrived at the destination.', args: { transfer_id: t._id }, summary: `delivered ${t.sample_id} to ${t.to}`, scan: { type: 'intake', at: t.to, from: 'courier:CJ-208', to: `location:${t.to}` } })
     ctx.delivered = true
@@ -321,7 +326,7 @@ async function recover(ctx) {
   const back = t.from
   rec({ entry_type: 'recovery', tool: 'return_to_storage', reversible: false, args: { sample_id: t.sample_id, freezer_id: back }, response: { freezer_id: back }, summary: `Returning ${t.sample_id} to the nearest certified freezer (${loc(back).name}).` })
   const start = ctx.pos ?? loc(t.from).map
-  await travel(ctx, recoveryPath(start, loc(back).map), 5000, false)
+  await travel(ctx, recoveryPath(start, loc(back).map), 5000, false, { from: back, to: back })
   const corr = `c-${String(++S.corr).padStart(4, '0')}`
   emitScan(ctx, 'checkin', back, corr, 'courier:CJ-208', `location:${back}`)
   rec({ entry_type: 'verification', correlation_id: corr, tool: 'return_to_storage', reversible: false, status: 'confirmed', summary: `Scanner confirmed check-in of ${t.sample_id} at ${back}.` })
@@ -347,19 +352,29 @@ function parseText(text) {
 }
 
 function intake(text, userId, source) {
+  const grantId = grantFor(userId)
+  if (!grantId) return { __forbidden: `${userId} has no active grant for the agent` } // real backend: 403, nothing stored
   const p = parseText(text)
   const reqId = `VR-${String(++S.vr).padStart(4, '0')}`
   const base = { _id: reqId, source, speaker_id: userId, transcript: text, audio_sha256: source === 'voice' ? 'mock-sha256-' + reqId : null, audio_verified: null, low_confidence_terms: [], created_at: now() }
 
   if (!p.sample) {
-    S.requests[reqId] = { ...base, low_confidence_terms: p.id ? [p.id] : [] }
+    S.requests[reqId] = { ...base }
+    // Real shapes: an unknown id keeps the id in `parsed` and explains in `problems`; gibberish has only {field, value, reason}.
+    const problems = p.id
+      ? (() => {
+          const s = suggest(p.id, Object.keys(S.samples))
+          const either = s.length === 1 ? s[0] : s.slice(0, -1).join(', ') + ' or ' + s.at(-1)
+          return [{ field: 'sample_id', value: p.id, reason: 'unknown_sample', suggestions: s, message: `I can't find ${p.id}.${s.length ? ` Did you mean ${either}?` : ''}` }]
+        })()
+      : [{ field: 'request', value: null, reason: 'not_understood' }]
     return {
       request_id: reqId,
       transcript: text,
-      parsed: { sample_id: null, from: p.from, to: p.to, window_start: null },
-      low_confidence_terms: p.id ? [p.id] : [],
+      parsed: p.id ? { sample_id: p.id, ...(p.from ? { from: p.from } : {}), ...(p.to ? { to: p.to } : {}) } : {},
+      low_confidence_terms: [],
       transfer_id: null,
-      alternatives: [{ field: 'sample_id', options: Object.keys(S.samples) }],
+      problems,
     }
   }
 
@@ -369,7 +384,7 @@ function intake(text, userId, source) {
     from: p.from,
     to: p.to,
     requested_by: userId,
-    grant_id: currentGrantId(),
+    grant_id: grantId,
     request_id: reqId,
     source,
     readback_confirmed: false,
@@ -393,13 +408,21 @@ function intake(text, userId, source) {
   })
   broadcast('transfer', { ...t })
   void run(ctx)
-  return { request_id: reqId, transcript: text, parsed: { sample_id: t.sample_id, from: t.from, to: t.to, window_start: null }, low_confidence_terms: [], transfer_id: t._id }
+  return { request_id: reqId, transcript: text, parsed: { sample_id: t.sample_id, from: t.from, to: t.to }, low_confidence_terms: [], transfer_id: t._id, problems: [] }
 }
 
-const currentGrantId = () => {
-  const all = Object.values(S.grants)
-  return (all.find((g) => g.status === 'active') ?? all[all.length - 1])._id
+// Same rule as agent/mongo_stores.find_grant: only the requester's OWN active grant counts.
+const grantFor = (userId) => Object.values(S.grants).find((g) => g.status === 'active' && g.grantor === userId)?._id ?? null
+const currentGrantId = () => Object.values(S.grants).find((g) => g.status === 'active')?._id ?? Object.keys(S.grants).at(-1)
+
+// difflib-ish suggestions: catalog ids that are close to what was heard.
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  return d[a.length][b.length]
 }
+const suggest = (value, options) => options.filter((o) => 1 - lev(value, o) / Math.max(value.length, o.length) >= 0.6).slice(0, 3)
 
 // A ledger row that is not tied to a tool call (e.g. a supervisor issuing a grant).
 function note(o) {
@@ -434,30 +457,84 @@ function haltRuns(runs, by, reason) {
 }
 
 // ---------- audit ----------
-function audit(question) {
+// Rows shaped like the real pipelines in agent/audit.py, and the same dashboard view agent/api.py builds from them.
+const scanRow = (s) => ({ ...s, timestamp: s.scanned_at, entry_type: 'scan', summary: `Scan: ${s.type} at ${s.location_id} by ${s.scanner_id}` })
+const withRequest = (e) => ({ ...e, request: S.requests[e.request_id] ?? null })
+
+function traceRows(transferId) {
+  return S.ledger.filter((e) => e.transfer_id === transferId).map(withRequest)
+}
+
+function auditRows(question) {
   const q = question.toLowerCase()
   const sample = /\b([A-Z]{2}-\d{4})\b/i.exec(question)?.[1]?.toUpperCase()
   const grant = /\b(GRANT-\d{4})\b/i.exec(question)?.[1]?.toUpperCase()
-  const reqsFor = (entries) => [...new Set(entries.map((e) => e.request_id).filter(Boolean))].map((id) => S.requests[id]).filter(Boolean)
-  const pack = (answer, entries, scans = S.scans, mode = 'canned') => ({ answer, mode, entries, scans, requests: reqsFor(entries) })
+  const trace = /\b(TR-\d{4})\b/i.exec(question)?.[1]?.toUpperCase()
+  const out = (route, rows, params = {}) => ({ question, route, params, routed_by: 'keywords', rows })
 
-  if (q.includes('gap')) {
-    const gaps = S.ledger.filter((e) => e.entry_type === 'outcome' && e.status === 'sent' && e.reversible === false && !S.scans.some((s) => s.correlation_id === e.correlation_id))
-    return { ...pack(`${gaps.length} irreversible action(s) were sent without a matching scan.`, gaps), gaps }
-  }
   if (q.includes('without') && (q.includes('supervisor') || q.includes('approval'))) {
-    const rows = S.ledger.filter((e) => e.entry_type === 'decision' && e.decision === 'allow' && ['checkout_sample', 'handoff_to_courier', 'deliver'].includes(e.tool) && S.samples[e.sample_id]?.restriction === 'forensic' && !Object.values(S.approvals).some((a) => a.transfer_id === e.transfer_id && a.status === 'approved'))
-    return pack(`${rows.length} restricted move(s) without a supervisor. ${rows.length === 0 ? 'The gate held.' : ''}`, rows)
+    const violations = S.ledger.filter((e) => e.entry_type === 'decision' && e.decision === 'allow' && ['checkout_sample', 'handoff_to_courier', 'deliver'].includes(e.tool) && S.samples[e.sample_id]?.restriction === 'forensic' && !Object.values(S.approvals).some((a) => a.transfer_id === e.transfer_id && a.status === 'approved'))
+    const blocked = S.ledger.filter((e) => e.entry_type === 'decision' && ['deny', 'pending_approval'].includes(e.decision) && S.samples[e.sample_id]?.restriction === 'forensic')
+    return out('restricted_without_supervisor', { violations, blocked_attempts: blocked })
   }
-  if (grant) {
-    const rows = S.ledger.filter((e) => e.grant_id === grant)
-    return pack(`${rows.length} ledger entries under ${grant}.`, rows)
+  if (q.includes('gap')) {
+    // $project: only a few fields, and no entry_type / decision / actor
+    const rows = S.ledger
+      .filter((e) => e.entry_type === 'outcome' && e.status === 'sent' && e.reversible === false && !S.scans.some((s) => s.correlation_id === e.correlation_id))
+      .map((e) => ({ _id: e._id, transfer_id: e.transfer_id, sample_id: e.sample_id, tool: e.tool, timestamp: e.timestamp, on_behalf_of: e.on_behalf_of, correlation_id: e.correlation_id, summary: e.summary }))
+    return out('gaps', rows)
   }
+  if (q.includes('exposure')) {
+    // $group: one aggregate row per sample, no entry_type
+    const by = {}
+    for (const e of S.ledger.filter((x) => ['exposure', 'violation'].includes(x.entry_type) && x.response?.minutes_out != null)) {
+      const g = (by[e.sample_id] ??= { _id: e.sample_id, total_minutes_out: 0, transfers: [], excursions: 0 })
+      g.total_minutes_out += e.response.minutes_out
+      if (!g.transfers.includes(e.transfer_id)) g.transfers.push(e.transfer_id)
+      if (e.response.exceeded) g.excursions += 1
+    }
+    return out('exposure_report', Object.values(by))
+  }
+  if (trace) return out('transfer_trace', traceRows(trace), { transfer_id: trace })
   if (sample) {
-    const rows = S.ledger.filter((e) => e.sample_id === sample)
-    return pack(`${rows.length} ledger entries for ${sample}.`, rows, S.scans.filter((s) => s.sample_id === sample))
+    // custody_chain: ledger rows + scans merged in time order; NO request lookup
+    const rows = [...S.ledger.filter((e) => e.sample_id === sample), ...S.scans.filter((s) => s.sample_id === sample).map(scanRow)].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    return out('custody_chain', rows, { sample_id: sample })
   }
-  return pack('Try a sample ID (TS-1077), a grant ID, or "custody gaps".', [])
+  if (grant) return out('semantic', S.ledger.filter((e) => e.grant_id === grant), { semantic_query: question })
+  return out('semantic', [], { semantic_query: question })
+}
+
+function dashboardView(r) {
+  const rows = r.rows
+  let flat
+  let answer
+  if (r.route === 'restricted_without_supervisor') {
+    flat = [...rows.violations, ...rows.blocked_attempts]
+    answer = `${rows.violations.length} restricted move(s) without a supervisor; ${rows.blocked_attempts.length} blocked attempt(s).`
+  } else if (r.route === 'exposure_report') {
+    flat = rows
+    answer = `${rows.length} sample(s) with time out of storage.`
+  } else {
+    flat = rows
+    answer = `${flat.length} matching record(s).`
+  }
+  const isScan = (x) => x.entry_type === 'scan'
+  const seen = new Set()
+  const requests = flat.map((x) => x.request).filter((q) => q && typeof q === 'object' && !seen.has(q._id) && seen.add(q._id))
+  return {
+    answer,
+    mode: r.route === 'semantic' ? 'semantic' : 'canned',
+    entries: flat.filter((x) => 'entry_type' in x && !isScan(x)),
+    scans: flat.filter(isScan),
+    requests,
+    gaps: r.route === 'gaps' ? flat : [],
+  }
+}
+
+const audit = (question) => {
+  const r = auditRows(question)
+  return { ...r, ...dashboardView(r) }
 }
 
 // ---------- http ----------
@@ -496,6 +573,13 @@ const server = http.createServer(async (req, res) => {
     return
   }
   if (m === 'GET' && path === '/health') return send(res, 200, { status: 'ok', mock: true })
+  let g
+  if (m === 'GET' && (g = /^\/audit\/transfer\/([^/]+)$/.exec(path))) return send(res, 200, traceRows(g[1].toUpperCase()))
+  if (m === 'GET' && (g = /^\/audit\/requests\/([^/]+)\/verify$/.exec(path))) {
+    const rq = S.requests[g[1]]
+    if (!rq) return send(res, 404, { detail: `unknown request ${g[1]}` })
+    return send(res, 200, rq.source === 'voice' ? { request_id: rq._id, has_audio: true, sha256: rq.audio_sha256, matches: true } : { request_id: rq._id, has_audio: false })
+  }
   if (m === 'GET' && path === '/state') {
     return send(res, 200, {
       transfers: Object.values(S.transfers),
@@ -513,7 +597,8 @@ const server = http.createServer(async (req, res) => {
   if (m === 'POST' && path === '/voice/requests') {
     await drain(req) // multipart audio is ignored; the transcript is scripted
     const text = VOICE_SCRIPT[S.voiceCalls++ % VOICE_SCRIPT.length]
-    return send(res, 200, intake(text, 'user:jlee', 'voice'))
+    const out = intake(text, 'user:jlee', 'voice')
+    return out.__forbidden ? send(res, 403, { detail: out.__forbidden }) : send(res, 201, out)
   }
 
   const body = m === 'POST' ? await readJson(req) : {}
@@ -521,7 +606,9 @@ const server = http.createServer(async (req, res) => {
 
   if (m === 'POST' && path === '/transfers') {
     if (!body.text) return send(res, 422, { detail: 'text is required' })
-    return send(res, 200, intake(String(body.text), user, 'typed'))
+    if (!String(body.text).trim()) return send(res, 422, { detail: 'text must not be blank' })
+    const out = intake(String(body.text), user, 'typed')
+    return out.__forbidden ? send(res, 403, { detail: out.__forbidden }) : send(res, 201, out)
   }
 
   let r
@@ -531,9 +618,10 @@ const server = http.createServer(async (req, res) => {
     if (ctx.halted || ['revoked', 'recovering', 'recovered', 'cancelled', 'received'].includes(ctx.t.state)) {
       return send(res, 409, { detail: `This transfer was halted (${ctx.haltInfo?.reason ?? 'no longer active'}), so it can no longer be confirmed.` })
     }
-    if (ctx.t.blocked_reason !== 'readback_pending') return send(res, 409, { detail: 'No read-back is pending for this transfer.' })
+    if (ctx.t.blocked_reason !== 'readback_pending') return send(res, 409, { detail: `no read-back is waiting on ${r[1]}` })
+    if (user !== ctx.t.requested_by) return send(res, 403, { detail: 'only the person who made the request can confirm' })
     ctx.waiters.confirm?.()
-    return send(res, 204)
+    return send(res, 200, { confirmed: true })
   }
 
   if (m === 'POST' && (r = /^\/approvals\/([^/]+)$/.exec(path))) {
@@ -596,6 +684,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (m === 'POST' && path === '/audit/query') return send(res, 200, audit(String(body.question ?? '')))
+
+  // Test helper (mock only): an irreversible action that was "sent" but never scanned, so the gaps query has something to find.
+  if (m === 'POST' && path === '/mock/seed-gap') {
+    const lastT = Object.values(S.transfers).at(-1)
+    const e = note({ entry_type: 'outcome', actor: 'agent:custody-01', on_behalf_of: 'user:jlee', grant_id: currentGrantId(), transfer_id: lastT?._id ?? 'TR-0031', sample_id: 'TS-1077', request_id: lastT?.request_id ?? null, tool: 'checkout_sample', reversible: false, status: 'sent', correlation_id: `c-gap-${S.seq}`, summary: 'Freezer service accepted checkout; no scanner confirmation arrived.' })
+    return send(res, 200, { ok: true, _id: e._id })
+  }
 
   if (m === 'POST' && path === '/mock/reset') {
     fresh()

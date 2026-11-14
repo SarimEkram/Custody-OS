@@ -1,6 +1,7 @@
 // Backend is the source of truth. This store only mirrors what the SSE stream and
 // REST responses report; it never decides authorization or marks anything verified.
 import { create } from 'zustand'
+import { resolveCourier } from '../lib/courier'
 import { mergeById, scanKey } from '../lib/normalize'
 import { DEFAULT_GRANT_ID, SEED_LOCATIONS, SEED_SAMPLES } from '../lib/seed'
 import type {
@@ -57,6 +58,8 @@ interface CustodyState {
   stopTransferId: string | null
   stopError: string | null
   restoreOpen: boolean
+  /** Set when the backend refuses a request because the requester has no active grant. */
+  noGrantAt: string | null
 
   setView: (v: View) => void
   setIdentity: (id: string) => void
@@ -69,6 +72,7 @@ interface CustodyState {
   setLastIntake: (r: IntakeResponse | null) => void
   setStopPhase: (p: StopPhase, transferId?: string | null, error?: string | null) => void
   setRestoreOpen: (open: boolean) => void
+  setNoGrant: (at: string | null) => void
   clearReadback: (transferId: string) => void
   applyEvent: (e: StreamEvent) => void
   hydrate: (s: Snapshot) => void
@@ -101,6 +105,7 @@ export const useCustodyStore = create<CustodyState>((set) => ({
   stopTransferId: null,
   stopError: null,
   restoreOpen: false,
+  noGrantAt: null,
 
   setView: (view) => set({ view }),
   setIdentity: (identityId) => set({ identityId }),
@@ -113,6 +118,7 @@ export const useCustodyStore = create<CustodyState>((set) => ({
   setLastIntake: (lastIntake) => set({ lastIntake }),
   setStopPhase: (stopPhase, stopTransferId = null, stopError = null) => set({ stopPhase, stopTransferId, stopError }),
   setRestoreOpen: (restoreOpen) => set({ restoreOpen }),
+  setNoGrant: (noGrantAt) => set({ noGrantAt }),
   clearReadback: (transferId) =>
     set((st) => {
       const { [transferId]: _removed, ...rest } = st.readbacks
@@ -152,8 +158,10 @@ export const useCustodyStore = create<CustodyState>((set) => ({
           return { approvals: { ...st.approvals, [e.data._id]: e.data } }
         case 'confirmation_request':
           return { readbacks: { ...st.readbacks, [e.data.transfer_id]: e.data } }
-        case 'courier_position':
-          return { courier: { ...st.courier, [e.data.transfer_id]: e.data } }
+        case 'courier_position': {
+          const next = resolveCourier(e.data, st.locations, st.courier[e.data.transfer_id])
+          return next ? { courier: { ...st.courier, [e.data.transfer_id]: next } } : {}
+        }
       }
     }),
 
