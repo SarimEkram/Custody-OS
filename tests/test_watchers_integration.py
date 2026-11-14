@@ -133,3 +133,19 @@ async def test_forged_scan_is_a_violation(watchers):
 
 async def test_no_scan_times_out_as_unconfirmed():
     assert await wait_for_scan("c-testw-never", timeout=2) is None
+
+
+async def test_direct_db_approval_unblocks_transfer(watchers):
+    ctx = await make_transfer(f"{PREFIX}5", state="blocked", blocked_reason="approval_pending",
+                              blocked_from="reserved", approval_id="APR-TESTW-1")
+    now = utcnow()
+    await admin_db().approvals.insert_one({
+        "_id": "APR-TESTW-1", "transfer_id": ctx.transfer_id, "sample_id": "TS-1042",
+        "requested_for_tool": "checkout_sample", "reason_requested": "test", "status": "pending",
+        "created_at": now, "expires_at": now + timedelta(minutes=30)})
+    await admin_db().approvals.update_one({"_id": "APR-TESTW-1"}, {"$set": {"status": "approved",
+                                                                            "decided_by": "user:mokafor"}})
+    async def unblocked():
+        tr = await agent_db().transfers.find_one({"_id": ctx.transfer_id})
+        return tr["state"] == "reserved" and tr["blocked_reason"] is None
+    assert await until(unblocked)

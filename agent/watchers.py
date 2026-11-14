@@ -25,6 +25,7 @@ from bson import ObjectId
 from agent import ledger
 from agent.db import agent_db
 from agent.models import Decision, EntryType, TransferState, utcnow
+from agent.policy_gate import _unblock
 
 log = logging.getLogger("custody.watchers")
 
@@ -154,8 +155,13 @@ class Watchers:
 
     # ---------------------------------------------------------- approvals: resume / cancel
     async def _on_approval_change(self, ch: dict) -> None:
-        if ch.get("fullDocument"):
-            await self.on_approval(ch["fullDocument"])
+        doc = ch.get("fullDocument")
+        if not doc:
+            return
+        if doc.get("status") == "approved":
+            # Safety net: an approval written straight to the DB (not via decide_approval) still unblocks.
+            await _unblock(agent_db(), doc["transfer_id"], "approval_pending")  # idempotent
+        await self.on_approval(doc)
 
 
 # -------------------------------------------------------------- dashboard event feed (SSE)
