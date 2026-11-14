@@ -5,6 +5,9 @@ lab hands back: reservation_id, courier_job_id). Internal tools (notify, parse_r
 request_confirmation) are not lab calls and are rejected here.
 """
 
+import asyncio
+from collections.abc import Awaitable, Callable
+
 import httpx
 
 
@@ -22,6 +25,9 @@ class LabClient:
         scheduler: httpx.AsyncClient,
         courier: httpx.AsyncClient,
         station: httpx.AsyncClient,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        arrival_timeout: float = 300.0,
+        poll: float = 0.5,
     ) -> None:
         self.freezer, self.scheduler, self.courier, self.station = (
             freezer,
@@ -29,6 +35,16 @@ class LabClient:
             courier,
             station,
         )
+        self.sleep, self.arrival_timeout, self.poll = sleep, arrival_timeout, poll
+
+    async def _wait_for_arrival(self, job: str, cid: str) -> None:
+        """deliver must not touch the station before the courier is there; the LLM must not poll."""
+        waited = 0.0
+        while (await self._send(self.courier, "GET", f"/jobs/{job}", cid))["status"] != "arrived":
+            if waited >= self.arrival_timeout:
+                raise LabError(409, f"courier {job} did not arrive within {self.arrival_timeout}s")
+            await self.sleep(self.poll)
+            waited += self.poll
 
     async def _send(self, client: httpx.AsyncClient, method: str, url: str, cid: str, **kw) -> dict:
         r = await client.request(method, url, headers={"X-Correlation-Id": cid}, **kw)
@@ -65,6 +81,7 @@ class LabClient:
             case "handoff_to_courier":
                 return await self._send(self.courier, "POST", f"/jobs/{job}/pickup", cid)
             case "deliver":
+                await self._wait_for_arrival(job, cid)
                 return await self._send(
                     self.station, "POST", "/intake", cid,
                     json={"sample_id": refs["sample_id"], "station_id": refs["to"],
