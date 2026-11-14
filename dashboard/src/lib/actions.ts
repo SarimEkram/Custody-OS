@@ -1,5 +1,6 @@
 // Turns the raw ledger (decision → outcome → verification rows) into one readable item per
 // action. Pure and derived: nothing here invents data or upgrades a status on its own.
+import { humanizeText } from './format'
 import type { Tone } from './format'
 import { GRANT_REISSUED } from './rules'
 import { explainRunEnd, isRunEnd, runEndStatus } from './runEnd'
@@ -125,7 +126,7 @@ function actionItem(group: LedgerEntry[], scans: ScanEvent[]): ActionItem {
     at: group[0].timestamp,
     entry: decision,
     title: decision.tool ?? decision.entry_type,
-    detail: (last.summary ?? decision.summary ?? '').replace(/\s*\(policy v\d+\)\.?$/, '.'),
+    detail: humanizeText(last.summary ?? decision.summary ?? '').replace(/\s*\(policy v\d+\)\.?$/, '.'),
     tone,
     status,
     steps,
@@ -173,7 +174,7 @@ function eventItem(e: LedgerEntry): ActionItem {
     at: e.timestamp,
     entry: e,
     title,
-    detail: e.summary ?? '',
+    detail: humanizeText(e.summary),
     tone,
     status: '',
     steps: [],
