@@ -2,12 +2,19 @@
 
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from agent.confirmation import ConfirmationService, NoPending, NotRequester
 from agent.intake import Intake, NoGrant
-from agent.voice import NoSpeech, TooLarge, VoiceIntake, VoiceUnavailable
+from agent.voice import (
+    NoSpeech,
+    SpokenPrompts,
+    TooLarge,
+    TTSError,
+    VoiceIntake,
+    VoiceUnavailable,
+)
 
 
 class TypedRequest(BaseModel):
@@ -31,6 +38,7 @@ def create_app(
     intake: Intake | None = None,
     voice: VoiceIntake | None = None,
     confirmations: ConfirmationService | None = None,
+    speech: SpokenPrompts | None = None,
 ) -> FastAPI:
     app = FastAPI(title="agent")
 
@@ -78,5 +86,33 @@ def create_app(
             except NotRequester as e:
                 raise HTTPException(403, "only the person who made the request can confirm") from e
             return {"confirmed": True}
+
+    if speech:
+
+        def mpeg(audio: bytes) -> Response:
+            return Response(audio, media_type="audio/mpeg")
+
+        def no_audio(e: TTSError) -> HTTPException:
+            return HTTPException(503, "Speech is unavailable; read the text on screen.")
+
+        @app.get("/transfers/{transfer_id}/readback/audio")
+        async def readback_audio(transfer_id: str) -> Response:
+            try:
+                return mpeg(await speech.readback(transfer_id))
+            except NoPending as e:
+                raise HTTPException(409, f"no read-back is waiting on {transfer_id}") from e
+            except TTSError as e:
+                raise no_audio(e) from e
+
+        @app.get("/approvals/{approval_id}/audio")
+        async def approval_audio(approval_id: str) -> Response:
+            try:
+                return mpeg(await speech.approval(approval_id))
+            except LookupError as e:
+                raise HTTPException(404, f"unknown approval {approval_id}") from e
+            except NoPending as e:
+                raise HTTPException(409, f"{approval_id} is not waiting for a decision") from e
+            except TTSError as e:
+                raise no_audio(e) from e
 
     return app
