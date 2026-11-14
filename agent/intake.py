@@ -54,13 +54,18 @@ def llm_parser(llm, catalog: Catalog) -> Parser:
     # field required, Groq rejected the model's call (HTTP 400) whenever the tech left out the time or
     # the source, which surfaced as a 500. The code validates what is missing (validate_parse).
     tool[0]["function"]["parameters"]["required"] = []
-    places = "; ".join(f"{i} = {name}" for i, name in catalog.locations.items())
-    system = (
-        "Turn the lab tech's request into a parse_request call. Use location ids, not names. "
-        f"Locations: {places}. Never guess: leave a field out if it was not said."
-    )
+
+    def system_prompt() -> str:
+        # Built per request, not once: the service creates the parser BEFORE the catalog is loaded from
+        # Atlas at startup, so a prompt built here would tell the model "Locations: ." (none) forever.
+        places = "; ".join(f"{i} = {name}" for i, name in catalog.locations.items())
+        return (
+            "Turn the lab tech's request into a parse_request call. Use location ids, not names. "
+            f"Locations: {places}. Never guess: leave a field out if it was not said."
+        )
 
     async def parse(text: str) -> dict:
+        system = system_prompt()
         try:
             msg = await llm.chat(
                 [{"role": "system", "content": system}, {"role": "user", "content": text}], tool
