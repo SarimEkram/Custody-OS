@@ -129,11 +129,14 @@ export async function getSnapshot(): Promise<Snapshot | null> {
   }
 }
 
-/** Expected: GET /health. */
-export async function checkHealth(): Promise<'up' | 'down' | 'unknown'> {
+/**
+ * GET /health. The backend answers 200 even when MongoDB is down, with `{status: "degraded", mongo: "down"}`
+ * so the dashboard can show which part is unhealthy. A bare 200 therefore does not mean healthy.
+ */
+export async function checkHealth(): Promise<'up' | 'degraded' | 'down' | 'unknown'> {
   try {
-    await request<unknown>('/health')
-    return 'up'
+    const h = await request<{ status?: string } | undefined>('/health')
+    return h && typeof h === 'object' && typeof h.status === 'string' && h.status !== 'ok' ? 'degraded' : 'up'
   } catch (e) {
     if (e instanceof ApiError && e.kind === 'not_implemented') return 'unknown'
     return 'down'

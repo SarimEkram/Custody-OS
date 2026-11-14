@@ -141,7 +141,7 @@ export function DemoDirector() {
             <div className="flex items-center justify-between"><dt className="text-muted">Event stream</dt><dd><ConnectionBadge /></dd></div>
             <div className="flex items-center justify-between">
               <dt className="text-muted">Backend health</dt>
-              <dd>{backend === 'up' ? <Badge tone="ok" label="UP" /> : backend === 'down' ? <Badge tone="bad" label="DOWN" /> : <Badge tone="mute" label="UNKNOWN (no /health)" />}</dd>
+              <dd>{backend === 'up' ? <Badge tone="ok" label="UP" /> : backend === 'degraded' ? <Badge tone="warn" label="Degraded: database down" /> : backend === 'down' ? <Badge tone="bad" label="DOWN" /> : <Badge tone="mute" label="UNKNOWN (no /health)" />}</dd>
             </div>
             <div className="flex items-center justify-between"><dt className="text-muted">Demo identity</dt><dd>{me?.name} · {me?.roleLabel}</dd></div>
             <div className="flex items-center justify-between"><dt className="text-muted">Agent mode</dt><dd>{scripted ? <Badge tone="info" label="SCRIPTED (DEMO_SCRIPTED=1)" /> : <Badge tone="ok" label="LIVE AI" />}</dd></div>
