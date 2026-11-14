@@ -1,4 +1,5 @@
 import { CheckCircle2, Hourglass, RotateCcw, Undo2 } from 'lucide-react'
+import { denialFor } from '../../lib/authority'
 import { pickActiveTransfer, useCustodyStore } from '../../store/custodyStore'
 
 /**
@@ -11,6 +12,8 @@ export function WorkflowStatus() {
   const scans = useCustodyStore((s) => s.scans)
 
   if (!t || !['revoked', 'recovering', 'recovered', 'cancelled'].includes(t.state)) return null
+  // Denied outright by the gate: nothing ran, so there is nothing to roll back (the denial card explains it).
+  if (denialFor(ledger, scans, t._id) && !ledger.some((e) => e.transfer_id === t._id && e.entry_type === 'compensation')) return null
 
   const mine = ledger.filter((e) => e.transfer_id === t._id)
   const compensations = mine.filter((e) => e.entry_type === 'compensation')

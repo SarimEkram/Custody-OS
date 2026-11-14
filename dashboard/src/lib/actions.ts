@@ -1,6 +1,7 @@
 // Turns the raw ledger (decision → outcome → verification rows) into one readable item per
 // action. Pure and derived: nothing here invents data or upgrades a status on its own.
 import type { Tone } from './format'
+import { GRANT_REISSUED } from './rules'
 import type { LedgerEntry, OutcomeStatus, ScanEvent } from './types'
 
 export type StepState = 'done' | 'active' | 'todo' | 'failed' | 'skipped'
@@ -159,7 +160,7 @@ function eventItem(e: LedgerEntry): ActionItem {
           : e.decision === 'allow'
             ? 'ok'
             : 'warn'
-  const title = e.decision === 'halt' ? 'Agent halted' : (EVENT_TITLES[e.entry_type] ?? e.entry_type)
+  const title = e.decision === 'halt' ? 'Agent halted' : e.rule_hits?.includes(GRANT_REISSUED) ? 'Authority restored' : (EVENT_TITLES[e.entry_type] ?? e.entry_type)
   return {
     id: e._id,
     kind: 'event',

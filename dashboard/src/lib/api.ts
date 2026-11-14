@@ -1,7 +1,7 @@
 // The ONLY module that talks to the agent service. The browser never contacts
 // MongoDB or ElevenLabs. Base URL defaults to /api (Vite proxies it to :8000 and
 // strips the prefix, so /api/voice/requests → FastAPI POST /voice/requests).
-import type { AuditResult, IntakeResponse, Snapshot } from './types'
+import type { AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? '/api'
 
@@ -90,6 +90,14 @@ export const stopAgent = (userId: string, transferId: string | null = null) =>
 
 export const revokeGrant = (grantId: string, userId: string) =>
   request<void>(`/grants/${encodeURIComponent(grantId)}/revoke`, post({ user_id: userId }))
+
+/**
+ * Ask the backend to issue a NEW grant to replace a revoked one. The server enforces who may do this
+ * (a supervisor), what the new grant may contain (never wider than the old) and how long it lasts.
+ * The client sends only who is asking and why; it can never choose scope or expiry.
+ */
+export const reissueGrant = (revokedGrantId: string, by: string, reason: string) =>
+  request<ReissueResult>(`/grants/${encodeURIComponent(revokedGrantId)}/reissue`, post({ by, reason }))
 
 export const auditQuery = (question: string, userId: string) =>
   request<AuditResult>('/audit/query', post({ question, user_id: userId })).then((r) => ({

@@ -70,6 +70,15 @@ export interface Grant {
   status: 'active' | 'revoked'
   expires_at?: string
   revoked_by?: string | null
+  /** The revoked grant this one replaces (a re-issue never reactivates the old grant). */
+  supersedes?: string | null
+}
+
+export interface ReissueResult {
+  ok: boolean
+  grant_id: string
+  supersedes: string
+  expires_at: string
 }
 
 export interface Transfer {

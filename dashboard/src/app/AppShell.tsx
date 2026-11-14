@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { RestoreAuthorityDialog } from '../components/command/RestoreAuthorityDialog'
 import { Header } from '../components/layout/Header'
 import { StopAgentButton } from '../components/workflow/StopAgentButton'
 import { useAgentStatus } from '../hooks/useAgentStatus'
@@ -55,6 +56,7 @@ export function AppShell() {
           {view === 'demo' && <DemoPage />}
         </main>
       </Boundary>
+      <RestoreAuthorityDialog />
       {/* Stop stays reachable from every view while the agent is operating. */}
       {status.operating && view !== 'control' && (
         <div className="fixed right-4 bottom-4 z-30 w-56"><StopAgentButton compact /></div>

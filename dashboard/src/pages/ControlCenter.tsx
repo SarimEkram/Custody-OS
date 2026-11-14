@@ -1,5 +1,7 @@
 import { ApprovalInbox } from '../components/approvals/ApprovalInbox'
+import { AuthorityBanner } from '../components/command/AuthorityBanner'
 import { CommandBar } from '../components/command/CommandBar'
+import { DenialNotice } from '../components/command/DenialNotice'
 import { ReadbackCard } from '../components/command/ReadbackCard'
 import { LedgerStream } from '../components/ledger/LedgerStream'
 import { LabMap } from '../components/map/LabMap'
@@ -13,11 +15,13 @@ export function ControlCenter() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <CommandBar />
+      <AuthorityBanner />
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-5 lg:overflow-hidden">
         <div className="min-h-[560px] lg:col-span-3 lg:min-h-0">
           <LabMap />
         </div>
         <div className="flex min-h-0 flex-col gap-4 lg:col-span-2">
+          <DenialNotice />
           <ReadbackCard />
           <ApprovalInbox />
           <WorkflowStatus />

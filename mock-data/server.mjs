@@ -48,7 +48,17 @@ function fresh() {
     approvals: {},
     requests: {},
     runs: [],
-    grants: { 'GRANT-0007': { _id: 'GRANT-0007', grantor: 'user:jlee', grantee: 'agent:custody-01', status: 'active', expires_at: new Date(Date.now() + 6 * 3600e3).toISOString() } },
+    grantSeq: 8,
+    grants: {
+      'GRANT-0007': {
+        _id: 'GRANT-0007',
+        grantor: 'user:jlee',
+        grantee: 'agent:custody-01',
+        status: 'active',
+        scope: { actions: ['lookup_sample', 'reserve_station', 'request_courier', 'notify', 'checkout_sample', 'handoff_to_courier', 'deliver'], sample_types: ['tissue', 'evidence'], locations: ['FZ-A', 'FZ-B', 'SEQ-3', 'FOR-LAB', 'CORR-1'], max_restriction: 'forensic' },
+        expires_at: new Date(Date.now() + 6 * 3600e3).toISOString(),
+      },
+    },
     samples: structuredClone(SAMPLES_SEED),
     tr: 30,
     vr: 18,
@@ -202,7 +212,7 @@ async function run(ctx) {
   const to = loc(t.to).name
   try {
     if (S.grants[t.grant_id]?.status !== 'active') {
-      led(ctx, { tool: 'lookup_sample', decision: 'deny', rule_hits: ['grant_not_active'], reason: 'The grant is not active.', summary: `Denied: ${t.grant_id} has been revoked. Nothing was sent to any lab system.` })
+      led(ctx, { tool: 'lookup_sample', decision: 'deny', rule_hits: ['grant_revoked'], reason: `grant ${t.grant_id} is revoked`, summary: `Denied: ${t.grant_id} has been revoked. Nothing was sent to any lab system.` })
       setTransfer(t, { state: 'cancelled' })
       return
     }
@@ -291,7 +301,7 @@ async function recover(ctx) {
     broadcast('approval', { ...S.approvals[ctx.approvalId] })
   }
   if (why !== 'denied') {
-    led(ctx, { decision: 'halt', tool: null, rule_hits: [why], summary: `${why === 'grant revoked' ? `Grant ${t.grant_id} revoked` : 'Stop pressed'} by ${by.replace('user:', '')}. Agent halted.`, reason: why })
+    led(ctx, { decision: 'halt', tool: null, rule_hits: [why === 'grant revoked' ? 'grant_revoked' : 'stop_switch'], summary: `${why === 'grant revoked' ? `Grant ${t.grant_id} revoked` : 'Stop pressed'} by ${by.replace('user:', '')}. Agent halted.`, reason: why === 'grant revoked' ? `grant ${t.grant_id} revoked by ${by.replace('user:', '')}` : `Stop pressed by ${by.replace('user:', '')}` })
     setTransfer(t, { state: 'revoked', halt: true, blocked_reason: null })
     await sleep(900)
   }
@@ -359,7 +369,7 @@ function intake(text, userId, source) {
     from: p.from,
     to: p.to,
     requested_by: userId,
-    grant_id: 'GRANT-0007',
+    grant_id: currentGrantId(),
     request_id: reqId,
     source,
     readback_confirmed: false,
@@ -384,6 +394,34 @@ function intake(text, userId, source) {
   broadcast('transfer', { ...t })
   void run(ctx)
   return { request_id: reqId, transcript: text, parsed: { sample_id: t.sample_id, from: t.from, to: t.to, window_start: null }, low_confidence_terms: [], transfer_id: t._id }
+}
+
+const currentGrantId = () => {
+  const all = Object.values(S.grants)
+  return (all.find((g) => g.status === 'active') ?? all[all.length - 1])._id
+}
+
+// A ledger row that is not tied to a tool call (e.g. a supervisor issuing a grant).
+function note(o) {
+  const lastT = Object.values(S.transfers).at(-1)
+  const e = {
+    _id: `L-${String(++S.seq).padStart(5, '0')}`,
+    timestamp: now(),
+    entry_type: 'correction',
+    transfer_id: lastT?._id ?? 'SYSTEM',
+    sample_id: null,
+    request_id: null,
+    correlation_id: `grant-${S.seq}`,
+    policy_id: 'custody-default',
+    policy_version: 3,
+    decision: 'allow',
+    tool: null,
+    status: null,
+    rule_hits: [],
+    ...o,
+  }
+  emitLedger(e)
+  return e
 }
 
 const active = () => S.runs.filter((r) => !r.dead && !['received', 'recovered', 'cancelled'].includes(r.t.state) && !r.halted)
@@ -519,8 +557,42 @@ const server = http.createServer(async (req, res) => {
     const g = S.grants[r[1]]
     if (!g) return send(res, 404, { detail: `unknown grant ${r[1]}` })
     g.status = 'revoked'
+    g.revoked_by = user
+    g.revoked_at = now()
     haltRuns(active().filter((x) => x.t.grant_id === g._id), user, 'grant revoked')
     return send(res, 204)
+  }
+
+  // Issue a NEW grant to replace a revoked one. Mirrors the rules the real backend must enforce:
+  // supervisor only, never the agent; the revoked grant is left untouched; scope is copied (the
+  // client cannot choose or widen it); expiry is fixed by the server; a reason is required.
+  if (m === 'POST' && (r = /^\/grants\/([^/]+)\/reissue$/.exec(path))) {
+    const by = body.by ?? body.user_id
+    if (!by) return send(res, 422, { detail: 'by is required' })
+    if (String(by).startsWith('agent:')) return send(res, 403, { detail: 'The agent cannot grant itself authority.' })
+    if (by !== 'user:mokafor') return send(res, 403, { detail: 'Only a supervisor can issue a new grant.' })
+    const old = S.grants[r[1]]
+    if (!old) return send(res, 404, { detail: `unknown grant ${r[1]}` })
+    const reason = String(body.reason ?? '').trim()
+    if (reason.length < 8) return send(res, 422, { detail: 'A reason of at least 8 characters is required.' })
+    if (old.status === 'active') return send(res, 409, { detail: `${old._id} is still active, so there is nothing to replace.` })
+    if (old.superseded_by) return send(res, 409, { detail: `${old._id} was already replaced by ${old.superseded_by}.` })
+    if (Object.values(S.grants).some((g) => g.status === 'active')) return send(res, 409, { detail: 'An active grant already exists for this agent.' })
+
+    const id = `GRANT-${String(S.grantSeq++).padStart(4, '0')}`
+    const expires = new Date(Date.now() + 60 * 60e3).toISOString()
+    old.superseded_by = id
+    S.grants[id] = { _id: id, grantor: old.grantor, grantee: old.grantee, status: 'active', scope: structuredClone(old.scope), supersedes: old._id, issued_by: by, created_at: now(), expires_at: expires }
+    note({
+      actor: by,
+      on_behalf_of: old.grantor,
+      grant_id: id,
+      rule_hits: ['grant_reissued'],
+      reason,
+      response: { supersedes: old._id, expires_at: expires },
+      summary: `${by.replace('user:', '')} issued ${id} to replace revoked ${old._id}. Same scope, expires in 60 min. Reason: ${reason}`,
+    })
+    return send(res, 200, { ok: true, grant_id: id, supersedes: old._id, expires_at: expires })
   }
 
   if (m === 'POST' && path === '/audit/query') return send(res, 200, audit(String(body.question ?? '')))

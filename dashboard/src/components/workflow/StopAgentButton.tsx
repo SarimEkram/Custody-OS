@@ -1,6 +1,7 @@
 import { Loader2, OctagonX } from 'lucide-react'
 import { useState } from 'react'
 import { useAgentStatus } from '../../hooks/useAgentStatus'
+import { useAuthority } from '../../hooks/useAuthority'
 import { ApiError, revokeGrant, stopAgent } from '../../lib/api'
 import { pickActiveTransfer, useCustodyStore } from '../../store/custodyStore'
 import { Mono } from '../ui/Badge'
@@ -76,13 +77,14 @@ export function GrantChip() {
   const transfer = useCustodyStore((s) => pickActiveTransfer(s))
   const grants = useCustodyStore((s) => s.grants)
   const identityId = useCustodyStore((s) => s.identityId)
+  const authority = useAuthority()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const grantId = transfer?.grant_id
   if (!grantId) return null
   const grant = grants[grantId]
-  const revoked = grant?.status === 'revoked' || ['revoked', 'recovering', 'recovered'].includes(transfer.state)
+  const revoked = grant?.status === 'revoked' || authority.revoked || ['revoked', 'recovering', 'recovered'].includes(transfer.state)
 
   const revoke = async () => {
     setPending(true)

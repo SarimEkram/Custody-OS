@@ -28,6 +28,12 @@ src/lib/         api.ts (only REST module), types.ts, normalize.ts, format.ts, a
 src/store/       custodyStore.ts (Zustand; mirrors backend state, never decides authorization)
 ```
 
+## Dev-server note (Windows)
+
+If the page behaves as though a file wasn't updated (for example "x is not a function" for something that clearly
+exists), Vite's file watcher may have cached a half-written file. Restart it with `npm run dev -- --force`.
+A production build (`npm run build`) is not affected.
+
 ## Integration status
 
 Verified here: `tsc`, `oxlint` (warnings only), `vitest` (31 tests), `vite build`.
@@ -42,7 +48,7 @@ Verified here: `tsc`, `oxlint` (warnings only), `vitest` (31 tests), `vite build
 | Stop `POST /control/stop`, revoke `POST /grants/{id}/revoke` | Implemented, awaiting backend. Halt is shown only when the backend reports it |
 | SSE `GET /stream` (ledger, transfer, scan, approval, confirmation_request, courier_position) | Implemented, awaiting backend. Dedupes by id, auto-reconnects |
 | Auditor `POST /audit/query` | Implemented, awaiting backend. Falls back to the live in-memory ledger, clearly labelled |
-| Exposure countdown | Implemented. Starts only from a scanner `checkout` event |
+| Exposure clock (counts up toward the limit) | Implemented. Starts only from a scanner `checkout` event; keeps running through recovery until a scanner `checkin` |
 | Map | Implemented. Sample positions change only on scanner events |
 | Demo Director | Scenarios run as typed requests. Reset shows the documented command only |
 | Original audio playback | Implemented, awaiting `GET /voice/requests/{id}/audio` |
@@ -60,4 +66,6 @@ Verified here: `tsc`, `oxlint` (warnings only), `vitest` (31 tests), `vite build
 8. **Exposure `response`** fields `minutes_out` and `exceeded`; recovery entries should carry `freezer_id` so the map can show the return freezer.
 9. **Halting while a read-back or approval is pending.** `POST /transfers/{id}/confirm` (and `/approvals/{id}`) on a halted or finished transfer must return a non-2xx with a readable `detail` (the mock returns `409`), not silently succeed. The halted transfer's `transfer` event should clear `blocked_reason`. The dashboard also times out any pending confirm/approve after 8 s, so a missing response never leaves a button spinning.
 10. New requests under a revoked grant should be denied by the gate (a `deny` decision with a rule hit), with no lab call made.
-11. A server-provided simulated clock if `DEMO_SPEED` is used. The browser does not convert time.
+11. **Revoked authority.** There is no grant event on the stream, so the dashboard decides the agent has no authority from ledger evidence: a `halt` or `deny` entry whose `rule_hits` include `grant_revoked`, `grant_expired` or `grant_missing`, until the gate next allows the agent to act. The `stop_switch` rule is deliberately not treated as lost authority. Denials are explained from `rule_hits` (see `src/lib/rules.ts`), so new gate rules should be added there. If grants ever stream (or `GET /state` returns `grants`), that status is used too.
+12. **Restoring authority (new).** `POST /grants/{id}/reissue` `{by, reason}`: issues a NEW grant, supervisor only, never the agent, scope copied (never widened), server-set expiry, reason recorded in the ledger. The full contract and security rules for Person A are in `GRANT_REISSUE_SPEC.md`. The dashboard's **Restore authority** button needs it; without it the dialog says so and points at the demo reset.
+13. A server-provided simulated clock if `DEMO_SPEED` is used. The browser does not convert time.

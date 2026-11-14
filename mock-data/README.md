@@ -29,6 +29,7 @@ after the scan.
 | `POST /voice/requests` | Ignores the audio and returns a scripted transcript, cycling through the 4 below |
 | `POST /transfers/{id}/confirm` | Releases the read-back. Returns `409` if the transfer was halted (e.g. grant revoked) |
 | `POST /approvals/{id}` | Only `user:mokafor` may decide (others get 403) |
+| `POST /grants/{id}/reissue` | Issues a NEW grant to replace a revoked one. Supervisor only (`by: user:mokafor`); refuses the agent; copies scope; fixed 60 min expiry; reason required; ledgered as `grant_reissued`. Spec: `dashboard/GRANT_REISSUE_SPEC.md` |
 | `POST /control/stop`, `POST /grants/{id}/revoke` | Halt, roll back reversible steps, recover the sample if it is out |
 | `POST /audit/query` | Canned answers: sample ID, `GRANT-0007`, "gaps", "without supervisor" |
 | `POST /mock/reset` | Clears all mock state (mock-only helper) |
@@ -62,7 +63,13 @@ a scanner check-in, and an exposure entry.
 ### Revoke while a read-back is waiting
 Send a request and, before confirming, click **Revoke grant**. The card is replaced by a notice that the
 transfer was stopped before you confirmed it and nothing left storage. A new request is then denied
-(`grant_not_active`) until you reset the mock (`POST /mock/reset`).
+(`grant_revoked`) until you reset the mock (`POST /mock/reset`).
+
+### Restore authority after a revoke
+After the revoke above, click **Restore authority** (banner or denial card). As Jordan Lee you'll be told only a
+supervisor can; use the button in the dialog to switch to M. Okafor, give a reason, tick the box and issue. A new
+grant (`GRANT-0008`) replaces the revoked one (`GRANT-0007` stays revoked) and new requests work again.
+`POST /mock/reset` still resets everything.
 
 ### Beat 4: auditor
 In the Auditor view, ask `What happened to TS-1077?`, `Find custody gaps.` or

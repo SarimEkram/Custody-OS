@@ -122,6 +122,34 @@ export function remainingSeconds(checkedOutAtIso: string, maxMinutesOut: number,
   return Math.floor((started + maxMinutesOut * 60_000 - nowMs) / 1000)
 }
 
+/** Whole seconds since the scanner-verified checkout. Never negative (guards against clock skew). */
+export function elapsedSeconds(checkedOutAtIso: string, nowMs: number): number {
+  const started = Date.parse(checkedOutAtIso)
+  if (Number.isNaN(started)) return Number.NaN
+  return Math.max(0, Math.floor((nowMs - started) / 1000))
+}
+
+export interface ExposureStatus {
+  level: ExposureLevel
+  /** 0-100, how much of the limit is used. */
+  percent: number
+  remaining: number
+  /** Seconds past the limit, 0 until it is exceeded. */
+  overBy: number
+}
+
+/** Everything the clock needs, from elapsed time and the sample's limit. */
+export function exposureStatus(elapsed: number, maxMinutesOut: number): ExposureStatus {
+  const limit = maxMinutesOut * 60
+  const remaining = limit - elapsed
+  return {
+    level: exposureLevel(remaining, maxMinutesOut),
+    percent: limit > 0 ? Math.min(100, Math.max(0, (elapsed / limit) * 100)) : 100,
+    remaining,
+    overBy: Math.max(0, -remaining),
+  }
+}
+
 export function exposureLevel(remainingSecs: number, maxMinutesOut: number): ExposureLevel {
   if (remainingSecs <= 0) return 'exceeded'
   return remainingSecs <= maxMinutesOut * 60 * 0.33 ? 'approaching' : 'safe'

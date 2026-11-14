@@ -56,6 +56,7 @@ interface CustodyState {
   stopPhase: StopPhase
   stopTransferId: string | null
   stopError: string | null
+  restoreOpen: boolean
 
   setView: (v: View) => void
   setIdentity: (id: string) => void
@@ -67,6 +68,7 @@ interface CustodyState {
   selectEntry: (id: string | null) => void
   setLastIntake: (r: IntakeResponse | null) => void
   setStopPhase: (p: StopPhase, transferId?: string | null, error?: string | null) => void
+  setRestoreOpen: (open: boolean) => void
   clearReadback: (transferId: string) => void
   applyEvent: (e: StreamEvent) => void
   hydrate: (s: Snapshot) => void
@@ -98,6 +100,7 @@ export const useCustodyStore = create<CustodyState>((set) => ({
   stopPhase: 'idle',
   stopTransferId: null,
   stopError: null,
+  restoreOpen: false,
 
   setView: (view) => set({ view }),
   setIdentity: (identityId) => set({ identityId }),
@@ -109,6 +112,7 @@ export const useCustodyStore = create<CustodyState>((set) => ({
   selectEntry: (selectedEntryId) => set({ selectedEntryId }),
   setLastIntake: (lastIntake) => set({ lastIntake }),
   setStopPhase: (stopPhase, stopTransferId = null, stopError = null) => set({ stopPhase, stopTransferId, stopError }),
+  setRestoreOpen: (restoreOpen) => set({ restoreOpen }),
   clearReadback: (transferId) =>
     set((st) => {
       const { [transferId]: _removed, ...rest } = st.readbacks

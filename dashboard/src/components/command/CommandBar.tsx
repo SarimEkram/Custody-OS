@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { ApiError, sendTypedRequest, sendVoiceRequest } from '../../lib/api'
 import { useMediaRecorder } from '../../hooks/useMediaRecorder'
 import type { IntakeResponse } from '../../lib/types'
+import { useAuthority } from '../../hooks/useAuthority'
+import { denialFor } from '../../lib/authority'
 import { useCustodyStore } from '../../store/custodyStore'
 import { Badge, Mono } from '../ui/Badge'
 
@@ -34,6 +36,10 @@ export function CommandBar() {
   const setLastIntake = useCustodyStore((s) => s.setLastIntake)
   const setActiveTransfer = useCustodyStore((s) => s.setActiveTransfer)
   const intake = useCustodyStore((s) => s.lastIntake)
+  const ledger = useCustodyStore((s) => s.ledger)
+  const scans = useCustodyStore((s) => s.scans)
+  const authority = useAuthority()
+  const denied = !!denialFor(ledger, scans, intake?.transfer_id)
 
   const rec = useMediaRecorder()
   const [phase, setPhase] = useState<Phase>('idle')
@@ -179,7 +185,7 @@ export function CommandBar() {
             value={recording ? '' : text}
             onChange={(e) => setText(e.target.value)}
             readOnly={recording}
-            placeholder={recording ? '' : 'Hold the mic and speak, or type: Move TS-1042 from Freezer B to Sequencing Station 3 for 2 PM'}
+            placeholder={recording ? '' : authority.revoked ? 'The agent has no active grant. A request will be denied and logged.' : 'Hold the mic and speak, or type: Move TS-1042 from Freezer B to Sequencing Station 3 for 2 PM'}
             aria-label="Typed request"
             className="h-12 min-w-0 flex-1 rounded-xl bg-panel/70 pr-24 pl-4 text-[15px] text-fg ring-1 ring-line/70 placeholder:text-muted/70 focus:ring-info"
           />
@@ -224,7 +230,7 @@ export function CommandBar() {
             <ArrowRight size={13} aria-hidden />
             {intake.parsed.to ? <Mono>{intake.parsed.to}</Mono> : <span className="text-warn">to?</span>}
           </span>
-          {phase === 'clarify' ? <Badge tone="warn" icon={AlertTriangle} label="Needs clarification" /> : phase === 'ready' ? <Badge tone="ok" label="Understood" /> : null}
+          {denied ? <Badge tone="bad" label="Denied by policy" /> : phase === 'clarify' ? <Badge tone="warn" icon={AlertTriangle} label="Needs clarification" /> : phase === 'ready' ? <Badge tone="ok" label="Understood" /> : null}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, sendTypedRequest, sendVoiceRequest } from './api'
-import { canDecideApproval, decisionView, exposureLevel, formatClock, outcomeView, remainingSeconds, stateLabel, verificationFor } from './format'
+import { canDecideApproval, decisionView, elapsedSeconds, exposureLevel, exposureStatus, formatClock, outcomeView, remainingSeconds, stateLabel, verificationFor } from './format'
 import { mergeById, parseStreamEvent, scanKey } from './normalize'
 import { IDENTITIES } from './seed'
 import type { Approval, LedgerEntry, ScanEvent } from './types'
@@ -135,6 +135,45 @@ describe('exposure countdown', () => {
   it('returns NaN for a bad timestamp instead of a fake time', () => {
     expect(Number.isNaN(remainingSeconds('garbage', 3, t0))).toBe(true)
     expect(formatClock(75)).toBe('1:15')
+  })
+})
+
+describe('exposure clock counts up', () => {
+  const start = '2026-11-14T19:00:00Z'
+  const t0 = Date.parse(start)
+
+  it('counts elapsed time up from the verified checkout', () => {
+    expect(elapsedSeconds(start, t0)).toBe(0)
+    expect(elapsedSeconds(start, t0 + 65_000)).toBe(65)
+    expect(formatClock(elapsedSeconds(start, t0 + 65_000))).toBe('1:05')
+  })
+
+  it('never goes negative if the scan time is slightly ahead of this clock', () => {
+    expect(elapsedSeconds(start, t0 - 5_000)).toBe(0)
+  })
+
+  it('returns NaN for a bad timestamp rather than inventing a time', () => {
+    expect(Number.isNaN(elapsedSeconds('garbage', t0))).toBe(true)
+  })
+
+  it('fills a bar toward the limit and reports remaining time', () => {
+    const s = exposureStatus(30, 3) // 30 s of a 3 min limit
+    expect(s.percent).toBeCloseTo(16.67, 1)
+    expect(s.remaining).toBe(150)
+    expect(s.level).toBe('safe')
+    expect(s.overBy).toBe(0)
+  })
+
+  it('warns when nearing the limit', () => {
+    expect(exposureStatus(130, 3).level).toBe('approaching')
+  })
+
+  it('keeps counting past the limit and says by how much, with the bar capped', () => {
+    const s = exposureStatus(200, 3)
+    expect(s.level).toBe('exceeded')
+    expect(s.overBy).toBe(20)
+    expect(s.percent).toBe(100)
+    expect(formatClock(s.overBy)).toBe('0:20')
   })
 })
 
