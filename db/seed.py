@@ -28,8 +28,10 @@ IDENTITIES = [
     {"_id": "user:mokafor", "kind": "human", "name": "M. Okafor", "role": "supervisor",
      "clearances": ["standard", "controlled", "forensic"]},
     {"_id": "agent:custody-01", "kind": "agent", "name": "Custody Agent", "model": settings.llm_model},
-    *({"_id": f"scanner:reader-{loc}", "kind": "scanner", "location_id": loc.upper()}
-      for loc in ("fza", "fzb", "corr1", "seq3", "forlab")),
+    # reader id suffix -> the real location id (not suffix.upper(): that gave "FZA", "SEQ3", ...)
+    *({"_id": f"scanner:reader-{suffix}", "kind": "scanner", "location_id": loc}
+      for suffix, loc in (("fza", "FZ-A"), ("fzb", "FZ-B"), ("corr1", "CORR-1"),
+                          ("seq3", "SEQ-3"), ("forlab", "FOR-LAB"))),
     {"_id": "scanner:courier", "kind": "scanner", "location_id": "CORR-1"},
 ]
 

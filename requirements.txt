@@ -4,8 +4,11 @@ pydantic>=2.7
 python-dotenv>=1.0
 httpx>=0.27
 fastapi>=0.115
+python-multipart      # voice upload (UploadFile)
 uvicorn[standard]>=0.30
-openai>=1.40          # Groq via OpenAI-compatible API
+openai>=1.40          # Groq via OpenAI-compatible API (the auditor; the agent loop uses httpx)
+certifi               # CA bundle: python.org macOS builds ship none
 pytest>=8
 pytest-asyncio>=0.23
+pytest-cov
 ruff>=0.6
