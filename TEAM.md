@@ -78,7 +78,7 @@ Builds what decides whether the AI is allowed to do something, and remembers eve
 6. **Set up instant alerts** (change streams). When someone hits Stop, takes a permission away, approves something, or the scanner confirms a handoff, MongoDB tells the AI right away.
 7. **Build the auditor search** (later in the day). Someone types a question in plain English, such as "show every time a restricted sample moved without a supervisor", and gets back the matching history. Atlas Automated Embedding may make this easier; try it during the check script.
 
-**Hands to others:** the `check()` function and `ledger.append()` (to B; A writes `agent/ledger.py`), the database layout and the instant-alert feed (to C), the app logins (to everyone).
+**Hands to others:** to B: `policy_gate.execute()` (wraps `check()`), `ledger.append()`, the watchers, the verifier transaction, scan signing and ready-made API routes (`agent/api.py`); to C: the database layout, the starting data (`db/seed.py`), the live feed and auditor routes; to everyone: the app logins. **Status: all built and on main. See `HANDOFF_A.md`.**
 
 ## Person B: the AI and the fake lab ("the worker")
 
@@ -108,7 +108,29 @@ Builds everything the judges see, and runs the presentation.
 6. **Auditor search box.** Shows the full history of a sample as a timeline, starting with the original voice recording (with a play button).
 7. **Demo prep:** the starting data, a reset button, pre-recorded voice clips as a backup for a noisy room, a recorded backup video, slides and practice runs. Make sure the venue Wi-Fi and phone hotspot IPs are added in Atlas before going on stage.
 
-**Needs from others:** the database layout and the live feed (from A), the "start a request" addresses and read-back messages (from B).
+**Needs from others:** the database layout, live feed, button routes and auditor routes (from A, done, served once B mounts `agent.api.router`), the "start a request" addresses, read-back messages and courier position (from B).
+
+## In-between pieces: who owns what
+
+These sit between two people. Each is **built once**, by the owner below. The other person only plugs it in.
+
+| Piece | Built by | Plugged in by | Where |
+|---|---|---|---|
+| Permission check before every action | A (done) | B: wrap every tool call in `policy_gate.execute()` | `agent/policy_gate.py` |
+| Verifier: a scan moves the transfer forward (one transaction) | A (done) | B: in the watcher's `on_scan`, call `custody.apply_verified_scan(scan)` | `agent/custody.py` |
+| Scan signatures | A (done) | B: the scanner calls `agent.signing.sign_scan()` | `agent/signing.py` |
+| Stop / revoke / approval / expiry alerts | A (done) | B: start `Watchers(...)` when the agent service starts | `agent/watchers.py` |
+| Backend for the buttons: Confirm, Approve, Revoke, Stop | A (done) | B: `app.include_router(agent.api.router)`; C: call `/api/...` | `agent/api.py` |
+| Live feed for the website (`/api/stream`) | A (done) | B: same router mount; C: `EventSource('/api/stream')` | `agent/api.py`, `agent/watchers.py` |
+| Auditor routes (`/api/audit/...`) | A (done) | B: same router mount; C: auditor panel | `agent/audit.py` |
+| The agent service itself (FastAPI app on :8000) | B | everyone runs it | `agent/` (B's `main.py`) |
+| Start-a-request routes (`/voice/requests`, `/transfers`) | B | C: mic button and typed box | B's service |
+| Courier position + read-back messages on the feed | B | C: map and read-back card | B's service |
+| Starting data | A wrote the base | C: extend it (more history, voice requests). Don't start a new file. Must pass `db/validators/` | `db/seed.py` |
+| Reset button / `scripts/reset_demo.sh` | C | everyone before each run | calls `python -m db.seed --reset` |
+| Demo-speed timing (`DEMO_SPEED`, minutes → seconds) | B + C agree | | FZ-A ↔ SEQ-3 is 2 min so TS-1077 (3-min limit) can leave the freezer |
+
+Full plug-in instructions: `HANDOFF_A.md`. Task status and blockers: `TASKS.md`.
 
 ## Checkpoints (all times today, Toronto time)
 
