@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import gridfs
 from pymongo import MongoClient
@@ -144,50 +144,115 @@ def reset_mutable(db) -> None:
         bucket.delete(f["_id"])
 
 
+# One finished transfer, shaped exactly like a real run: decision -> outcome (sent) -> for physical steps a
+# scanner-signed custody_event and a verification row. (Decisions alone render as "Running" forever in the
+# dashboard, and an irreversible outcome with no scan shows up as a false gap in the auditor.)
+HISTORY_STEPS = [
+    # tool, reversible, summary of the decision, scan (type, location, scanner, to_custodian, text) or None
+    ("reserve_station", True, "Agent reserve_station TS-1042 for jlee under GRANT-0007 (policy custody-default v3): "
+                              "ALLOWED. all checks passed.", None),
+    ("request_courier", True, "Agent request_courier TS-1042 for jlee under GRANT-0007 (policy custody-default v3): "
+                              "ALLOWED. all checks passed.", None),
+    ("checkout_sample", False, "Agent checkout_sample TS-1042 for jlee under GRANT-0007 (policy custody-default v3): "
+                               "ALLOWED. all checks passed.",
+     ("checkout", "FZ-B", "scanner:reader-fzb", "courier:CJ-HIST", "Scanner confirmed TS-1042 left FZ-B.")),
+    ("handoff_to_courier", False, "Agent handoff_to_courier TS-1042 for jlee under GRANT-0007 (policy "
+                                  "custody-default v3): ALLOWED. all checks passed.",
+     ("handoff", "CORR-1", "scanner:courier", "courier:CJ-HIST", "Scanner confirmed courier picked up TS-1042.")),
+    ("deliver", False, "Agent deliver TS-1042 for jlee under GRANT-0007 (policy custody-default v3): ALLOWED. "
+                       "all checks passed.",
+     ("intake", "SEQ-3", "scanner:reader-seq3", "location:SEQ-3", "Scanner confirmed SEQ-3 received TS-1042.")),
+]
+DENIED_TEXT = "Move EV-2201 to Sequencing Station 3."
+
+
 async def seed_history() -> None:
-    """A finished transfer and one past denial from 'earlier today', so the auditor view isn't empty."""
+    """A finished transfer (TR-0001) and one denied request (TR-0002), so the auditor view isn't empty."""
+    from agent.signing import sign_scan
+
     db = admin_db()
     t0 = NOW - timedelta(hours=3)
     base = {"actor": "agent:custody-01", "on_behalf_of": "user:jlee", "grant_id": "GRANT-0007",
-            "policy_id": "custody-default", "policy_version": 3, "request_id": "VR-0001"}
-    await db.voice_requests.insert_one({
-        "_id": "VR-0001", "source": "typed", "speaker_id": "user:jlee", "audio_file_id": None, "audio_sha256": None,
-        "stt": None, "transcript": "Move TS-1042 from Freezer B to Sequencing Station 3.", "words": [],
-        "low_confidence_terms": [], "parsed": {"sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3"},
-        "transfer_id": "TR-0001", "created_at": t0})
-    await db.transfers.insert_one({
-        "_id": "TR-0001", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "requested_by": "user:jlee",
-        "grant_id": "GRANT-0007", "request_id": "VR-0001", "source": "typed", "state": "received", "halt": False,
-        "blocked_reason": None, "request_text": "Move TS-1042 from Freezer B to Sequencing Station 3.",
-        "history": [{"state": s, "at": t0 + timedelta(minutes=i)} for i, s in
-                    enumerate(["requested", "reserved", "checked_out", "in_transit", "received"])],
-        "updated_at": t0 + timedelta(minutes=5)})
-    rows = [
-        ("intake", None, "allow", None, "jlee requested by typing: 'Move TS-1042 from Freezer B to Sequencing "
-                                        "Station 3.'"),
-        ("decision", "reserve_station", "allow", None, "Agent reserve_station TS-1042 for jlee under GRANT-0007 "
-                                                       "(policy custody-default v3): ALLOWED."),
-        ("decision", "request_courier", "allow", None, "Agent request_courier TS-1042 for jlee under GRANT-0007: "
-                                                       "ALLOWED."),
-        ("decision", "checkout_sample", "allow", None, "Agent checkout_sample TS-1042 for jlee under GRANT-0007: "
-                                                       "ALLOWED."),
-        ("verification", "checkout_sample", "allow", "confirmed", "Scanner confirmed TS-1042 left FZ-B."),
-        ("verification", "handoff_to_courier", "allow", "confirmed", "Scanner confirmed courier picked up TS-1042."),
-        ("verification", "deliver", "allow", "confirmed", "Scanner confirmed SEQ-3 received TS-1042."),
-    ]
-    for i, (etype, tool, decision, status, summary) in enumerate(rows):
-        await ledger.append({**base, "timestamp": t0 + timedelta(minutes=i), "entry_type": etype,
-                             "transfer_id": "TR-0001", "sample_id": "TS-1042", "correlation_id": f"c-hist{i:02d}",
-                             "tool": tool, "decision": decision, "status": status, "summary": summary,
-                             **({"actor": "user:jlee"} if etype == "intake" else {})}, db=db)
-    await ledger.append({**base, "timestamp": t0 + timedelta(minutes=40), "entry_type": "decision",
-                         "transfer_id": "TR-0002", "sample_id": "EV-2201", "correlation_id": "c-hist-deny",
-                         "request_id": None, "tool": "reserve_station", "args": {"station_id": "SEQ-3"},
-                         "decision": "deny", "rule_hits": ["destination_not_certified"],
+            "policy_id": "custody-default", "policy_version": 3}
+    await db.voice_requests.insert_many([
+        {"_id": "VR-0001", "source": "typed", "speaker_id": "user:jlee", "audio_file_id": None,
+         "audio_sha256": None, "stt": None, "transcript": "Move TS-1042 from Freezer B to Sequencing Station 3.",
+         "words": [], "low_confidence_terms": [],
+         "parsed": {"sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3"}, "transfer_id": "TR-0001",
+         "created_at": t0},
+        {"_id": "VR-0002", "source": "typed", "speaker_id": "user:jlee", "audio_file_id": None,
+         "audio_sha256": None, "stt": None, "transcript": DENIED_TEXT, "words": [], "low_confidence_terms": [],
+         "parsed": {"sample_id": "EV-2201", "from": "FZ-B", "to": "SEQ-3"}, "transfer_id": "TR-0002",
+         "created_at": t0 + timedelta(minutes=39)}])
+    await db.transfers.insert_many([
+        {"_id": "TR-0001", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "requested_by": "user:jlee",
+         "grant_id": "GRANT-0007", "request_id": "VR-0001", "source": "typed", "state": "received", "halt": False,
+         "blocked_reason": None, "request_text": "Move TS-1042 from Freezer B to Sequencing Station 3.",
+         "history": [{"state": st, "at": t0 + timedelta(minutes=i)} for i, st in
+                     enumerate(["requested", "reserved", "checked_out", "in_transit", "received"])],
+         "updated_at": t0 + timedelta(minutes=5)},
+        # owns the denial below, so the id is taken and a new real transfer can never reuse it
+        {"_id": "TR-0002", "sample_id": "EV-2201", "from": "FZ-B", "to": "SEQ-3", "requested_by": "user:jlee",
+         "grant_id": "GRANT-0007", "request_id": "VR-0002", "source": "typed", "state": "cancelled", "halt": False,
+         "blocked_reason": None, "request_text": DENIED_TEXT,
+         "history": [{"state": "requested", "at": t0 + timedelta(minutes=39)},
+                     {"state": "cancelled", "at": t0 + timedelta(minutes=40)}],
+         "updated_at": t0 + timedelta(minutes=40)}])
+
+    minute = 0
+
+    def at() -> datetime:
+        nonlocal minute
+        minute += 1
+        return t0 + timedelta(minutes=minute, seconds=5 * minute)
+
+    tr1 = {"transfer_id": "TR-0001", "sample_id": "TS-1042", "request_id": "VR-0001"}
+    await ledger.append({**base, **tr1, "timestamp": t0, "entry_type": "intake", "actor": "user:jlee",
+                         "correlation_id": "c-hist-intake", "decision": "allow", "policy_id": "intake",
+                         "policy_version": 1, "response": {"transcript": "Move TS-1042 from Freezer B to "
+                         "Sequencing Station 3."}, "summary": "jlee requested by typing: 'Move TS-1042 from "
+                         "Freezer B to Sequencing Station 3.'"}, db=db)
+    for tool, reversible, decision_text, scan in HISTORY_STEPS:
+        cid = f"c-hist-{tool}"
+        d_id = await ledger.append({**base, **tr1, "timestamp": at(), "entry_type": "decision", "tool": tool,
+                                    "correlation_id": cid, "reversible": reversible, "decision": "allow",
+                                    "reason": "Routine move.", "summary": decision_text}, db=db)
+        o_id = await ledger.append({**base, **tr1, "timestamp": at(), "entry_type": "outcome", "tool": tool,
+                                    "correlation_id": cid, "reversible": reversible, "decision": "allow",
+                                    "status": "sent", "refs": [d_id], "response": {"ok": True},
+                                    "summary": f"The lab system accepted {tool} for TR-0001"
+                                               + (f"; awaiting {scan[0]} scan." if scan else ".")}, db=db)
+        if not scan:
+            continue
+        kind, location, scanner, to_cust, text = scan
+        when = at()
+        event = {"scanner_id": scanner, "type": kind, "sample_id": "TS-1042", "location_id": location,
+                 "from_custodian": "location:FZ-B", "to_custodian": to_cust, "correlation_id": cid,
+                 "scanned_at": when}
+        event["signature"] = sign_scan(event)
+        await db.custody_events.insert_one(event)  # seed runs as admin; at runtime only scanner_svc writes these
+        await ledger.append({**base, **tr1, "timestamp": when, "entry_type": "verification", "tool": tool,
+                             "correlation_id": cid, "reversible": False, "decision": "allow",
+                             "status": "confirmed", "refs": [o_id], "summary": text}, db=db)
+        if kind == "intake":
+            await ledger.append({**base, **tr1, "timestamp": at(), "entry_type": "exposure",
+                                 "correlation_id": cid, "decision": "allow", "reversible": None,
+                                 "response": {"minutes_out": 3.0, "limit_minutes": 20, "exceeded": False},
+                                 "summary": "TS-1042 was out of storage 3.0 min (limit 20): within limit."}, db=db)
+
+    deny = {**base, "transfer_id": "TR-0002", "sample_id": "EV-2201", "request_id": "VR-0002"}
+    await ledger.append({**deny, "timestamp": t0 + timedelta(minutes=39), "entry_type": "intake",
+                         "actor": "user:jlee", "correlation_id": "c-hist-intake2", "decision": "allow",
+                         "policy_id": "intake", "policy_version": 1, "response": {"transcript": DENIED_TEXT},
+                         "summary": f"jlee requested by typing: '{DENIED_TEXT}'"}, db=db)
+    await ledger.append({**deny, "timestamp": t0 + timedelta(minutes=40), "entry_type": "decision",
+                         "correlation_id": "c-hist-deny", "tool": "reserve_station", "reversible": True,
+                         "args": {"station_id": "SEQ-3"}, "decision": "deny",
+                         "rule_hits": ["destination_not_certified"],
                          "reason": "Tech asked to move the swab to sequencing.",
                          "summary": "Agent reserve_station EV-2201 for jlee under GRANT-0007 (policy custody-default "
                                     "v3): DENIED. SEQ-3 lacks FORENSIC certification."}, db=db)
-    print("seeded   history: TR-0001 (completed), TR-0002 (denied), VR-0001")
+    print("seeded   history: TR-0001 (completed, with scans), TR-0002 (denied, cancelled), VR-0001, VR-0002")
 
 
 def main() -> None:
