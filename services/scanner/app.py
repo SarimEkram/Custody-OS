@@ -7,7 +7,7 @@ Mongo-backed one (scanner_svc user) once the Atlas URIs exist.
 
 import hashlib
 import hmac
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 from fastapi import FastAPI, HTTPException
@@ -66,7 +66,7 @@ def create_app(store: Store, readers: dict[str, str], samples: set[str], secret:
             raise HTTPException(400, f"{raw.reader_id} is not at {raw.location_id}")
         event = raw.model_dump(exclude={"reader_id"}, exclude_none=True)
         event["scanner_id"] = raw.reader_id
-        event["scanned_at"] = datetime.now(timezone.utc)
+        event["scanned_at"] = datetime.now(UTC)
         event["signature"] = sign(secret, event)
         store.insert(event)
         return {"correlation_id": raw.correlation_id, "scanned_at": event["scanned_at"].isoformat()}

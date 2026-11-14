@@ -155,16 +155,15 @@ class GateDecision(BaseModel):
     decision: Literal["allow", "deny", "pending_approval", "pending_confirmation", "halt"]
     policy_id: str
     policy_version: int
-    rule_hits: list[str]  # e.g. ["forensic_requires_supervisor"]
-    risk_flags: list[str] = []  # from Vector Search similar incidents
+    rule_hits: list[str]          # e.g. ["forensic_requires_supervisor"]
+    risk_flags: list[str] = []    # from Vector Search similar incidents
     approval_id: str | None = None
-    ledger_id: ObjectId  # the decision entry already written
-
+    ledger_id: ObjectId           # the decision entry already written
 
 async def check(
     *,
-    actor: str,  # "agent:custody-01"
-    on_behalf_of: str,  # "user:jlee"
+    actor: str,                   # "agent:custody-01"
+    on_behalf_of: str,            # "user:jlee"
     grant_id: str,
     transfer_id: str,
     tool: str,
@@ -172,7 +171,6 @@ async def check(
     reason: str,
     correlation_id: str,
 ) -> GateDecision: ...
-
 
 async def execute(tool_call: ToolCall, ctx: RunContext) -> ToolResult:
     """check() → if allow: call lab service → write outcome entry → verify if physical."""

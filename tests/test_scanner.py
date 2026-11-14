@@ -1,6 +1,6 @@
 import hashlib
 import hmac
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,7 +44,7 @@ def test_valid_scan_is_written_with_scanner_id_and_correlation_id(ctx):
 
 def test_scanner_stamps_the_time_not_the_caller(ctx):
     client, store = ctx
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     client.post("/scan", json=scan(scanned_at="2001-01-01T00:00:00Z"))
     [event] = store.events
     assert isinstance(event["scanned_at"], datetime)

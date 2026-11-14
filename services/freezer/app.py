@@ -5,7 +5,7 @@ When a sample physically leaves or returns, it hands a raw scan to `emit`
 that fails, so the agent's "sent" is never confirmed.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel

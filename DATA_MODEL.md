@@ -282,12 +282,11 @@ App rule (not expressible cleanly in the validator): when `source == "voice"`, `
 ## Indexes (`db/indexes.py`)
 
 ```python
-await db.grants.create_index("expires_at", expireAfterSeconds=0)  # TTL
+await db.grants.create_index("expires_at", expireAfterSeconds=0)            # TTL
 await db.grants.create_index([("grantee", 1), ("status", 1)])
-await db.reservations.create_index("expires_at", expireAfterSeconds=0)  # TTL
-await db.approvals.create_index(
-    "expires_at", expireAfterSeconds=0, partialFilterExpression={"status": "pending"}
-)  # TTL only pending
+await db.reservations.create_index("expires_at", expireAfterSeconds=0)      # TTL
+await db.approvals.create_index("expires_at", expireAfterSeconds=0,
+                                partialFilterExpression={"status": "pending"})  # TTL only pending
 await db.ledger.create_index([("transfer_id", 1), ("timestamp", 1)])
 await db.ledger.create_index([("sample_id", 1), ("timestamp", 1)])
 await db.ledger.create_index("correlation_id")
@@ -378,36 +377,24 @@ If any check fails, tell the team immediately and update this doc's feature map.
 
 ```python
 # 1. Revocation → halt
-pipeline = [
-    {
-        "$match": {
-            "$or": [
-                {"operationType": "update", "updateDescription.updatedFields.status": "revoked"},
-                {"operationType": "delete"},  # TTL expiry
-            ]
-        }
-    }
-]
+pipeline = [{"$match": {"$or": [
+    {"operationType": "update", "updateDescription.updatedFields.status": "revoked"},
+    {"operationType": "delete"}                       # TTL expiry
+]}}]
 async with await db.grants.watch(pipeline, full_document="updateLookup") as stream:
     async for ch in stream:
         grant_id = ch["documentKey"]["_id"]
-        await halt_transfers_for_grant(grant_id)  # sets transfers.halt = true, state = revoked
+        await halt_transfers_for_grant(grant_id)      # sets transfers.halt = true, state = revoked
 
 # 2. Scan → advance state (verifier)
 pipeline = [{"$match": {"operationType": "insert"}}]
 async with await db.custody_events.watch(pipeline) as stream:
     async for ch in stream:
-        await on_scan(ch["fullDocument"])  # match correlation_id, run handoff txn
+        await on_scan(ch["fullDocument"])             # match correlation_id, run handoff txn
 
 # 3. Approval → resume
-pipeline = [
-    {
-        "$match": {
-            "operationType": "update",
-            "updateDescription.updatedFields.status": {"$in": ["approved", "denied"]},
-        }
-    }
-]
+pipeline = [{"$match": {"operationType": "update",
+                        "updateDescription.updatedFields.status": {"$in": ["approved", "denied"]}}}]
 # 4. Stop switch
 pipeline = [{"$match": {"operationType": "insert", "fullDocument.type": "stop"}}]
 ```
@@ -422,39 +409,19 @@ async def apply_verified_scan(client, scan: dict, transfer: dict, next_state: st
             db = client.custody
             await db.samples.update_one(
                 {"_id": scan["sample_id"]},
-                {
-                    "$set": {
-                        "location_id": scan["location_id"],
-                        "custodian": scan["to_custodian"],
-                        **(
-                            {"status": "out", "checked_out_at": scan["scanned_at"]}
-                            if scan["type"] == "checkout"
-                            else {}
-                        ),
-                        **(
-                            {"status": "stored", "checked_out_at": None}
-                            if scan["type"] == "checkin"
-                            else {}
-                        ),
-                    }
-                },
-                session=s,
-            )
+                {"$set": {"location_id": scan["location_id"],
+                          "custodian": scan["to_custodian"],
+                          **({"status": "out", "checked_out_at": scan["scanned_at"]} if scan["type"] == "checkout" else {}),
+                          **({"status": "stored", "checked_out_at": None} if scan["type"] == "checkin" else {})}},
+                session=s)
             res = await db.transfers.update_one(
-                {"_id": transfer["_id"], "state": transfer["state"]},  # optimistic guard
-                {
-                    "$set": {"state": next_state, "updated_at": now()},
-                    "$push": {
-                        "history": {"state": next_state, "at": now(), "scan_id": scan["_id"]}
-                    },
-                },
-                session=s,
-            )
+                {"_id": transfer["_id"], "state": transfer["state"]},   # optimistic guard
+                {"$set": {"state": next_state, "updated_at": now()},
+                 "$push": {"history": {"state": next_state, "at": now(), "scan_id": scan["_id"]}}},
+                session=s)
             if res.modified_count != 1:
                 raise StateConflict(transfer["_id"])
-            await db.ledger.insert_one(
-                verification_entry(scan, transfer, status="confirmed"), session=s
-            )
+            await db.ledger.insert_one(verification_entry(scan, transfer, status="confirmed"), session=s)
 ```
 
 ## Aggregations
@@ -462,35 +429,23 @@ async def apply_verified_scan(client, scan: dict, transfer: dict, next_state: st
 ### Custody chain for a sample (auditor timeline)
 ```python
 [
-    {"$match": {"sample_id": "EV-2201"}},
-    {
-        "$unionWith": {
-            "coll": "custody_events",
-            "pipeline": [
-                {"$match": {"sample_id": "EV-2201"}},
-                {"$addFields": {"timestamp": "$scanned_at", "entry_type": "scan"}},
-            ],
-        }
-    },
-    {"$sort": {"timestamp": 1}},
-    {"$project": {"embedding": 0}},
+  {"$match": {"sample_id": "EV-2201"}},
+  {"$unionWith": {"coll": "custody_events",
+                  "pipeline": [{"$match": {"sample_id": "EV-2201"}},
+                               {"$addFields": {"timestamp": "$scanned_at", "entry_type": "scan"}}]}},
+  {"$sort": {"timestamp": 1}},
+  {"$project": {"embedding": 0}}
 ]
 ```
 
 ### Gaps: `sent` with no matching scan
 ```python
 [
-    {"$match": {"entry_type": "outcome", "status": "sent", "reversible": False}},
-    {
-        "$lookup": {
-            "from": "custody_events",
-            "localField": "correlation_id",
-            "foreignField": "correlation_id",
-            "as": "scans",
-        }
-    },
-    {"$match": {"scans": {"$size": 0}}},
-    {"$project": {"transfer_id": 1, "sample_id": 1, "tool": 1, "timestamp": 1, "on_behalf_of": 1}},
+  {"$match": {"entry_type": "outcome", "status": "sent", "reversible": False}},
+  {"$lookup": {"from": "custody_events", "localField": "correlation_id",
+               "foreignField": "correlation_id", "as": "scans"}},
+  {"$match": {"scans": {"$size": 0}}},
+  {"$project": {"transfer_id": 1, "sample_id": 1, "tool": 1, "timestamp": 1, "on_behalf_of": 1}}
 ]
 ```
 (Ledger outcome entries are never updated, so "sent" stays on the outcome row; confirmation is a separate `verification` entry. That's why the gap query joins on scans, not on a status field.)
@@ -498,32 +453,20 @@ async def apply_verified_scan(client, scan: dict, transfer: dict, next_state: st
 ### Exposure report
 ```python
 [
-    {"$match": {"entry_type": "exposure"}},
-    {
-        "$group": {
-            "_id": "$sample_id",
-            "total_minutes_out": {"$sum": "$response.minutes_out"},
-            "excursions": {"$sum": {"$cond": ["$response.exceeded", 1, 0]}},
-        }
-    },
+  {"$match": {"entry_type": "exposure"}},
+  {"$group": {"_id": "$sample_id", "total_minutes_out": {"$sum": "$response.minutes_out"},
+              "excursions": {"$sum": {"$cond": ["$response.exceeded", 1, 0]}}}}
 ]
 ```
 
 ### From any action back to the spoken request
 ```python
 [
-    {"$match": {"transfer_id": "TR-0031"}},
-    {"$sort": {"timestamp": 1}},
-    {
-        "$lookup": {
-            "from": "voice_requests",
-            "localField": "request_id",
-            "foreignField": "_id",
-            "pipeline": [{"$project": {"words": 0}}],
-            "as": "request",
-        }
-    },
-    {"$project": {"embedding": 0}},
+  {"$match": {"transfer_id": "TR-0031"}},
+  {"$sort": {"timestamp": 1}},
+  {"$lookup": {"from": "voice_requests", "localField": "request_id", "foreignField": "_id",
+               "pipeline": [{"$project": {"words": 0}}], "as": "request"}},
+  {"$project": {"embedding": 0}}
 ]
 ```
 The auditor UI shows the transcript with a play button (streams the GridFS audio via `GET /voice/requests/{id}/audio`) and re-checks `audio_sha256`.
@@ -531,35 +474,15 @@ The auditor UI shows the transcript with a play button (streams the GridFS audio
 ### Restricted moves without a supervisor
 ```python
 [
-    {
-        "$match": {
-            "entry_type": "decision",
-            "decision": "allow",
-            "tool": {"$in": ["checkout_sample", "handoff_to_courier", "deliver"]},
-        }
-    },
-    {"$lookup": {"from": "samples", "localField": "sample_id", "foreignField": "_id", "as": "s"}},
-    {"$match": {"s.restriction": "forensic"}},
-    {
-        "$lookup": {
-            "from": "approvals",
-            "let": {"t": "$transfer_id"},
-            "pipeline": [
-                {
-                    "$match": {
-                        "$expr": {
-                            "$and": [
-                                {"$eq": ["$transfer_id", "$$t"]},
-                                {"$eq": ["$status", "approved"]},
-                            ]
-                        }
-                    }
-                }
-            ],
-            "as": "appr",
-        }
-    },
-    {"$match": {"appr": {"$size": 0}}},
+  {"$match": {"entry_type": "decision", "decision": "allow",
+              "tool": {"$in": ["checkout_sample", "handoff_to_courier", "deliver"]}}},
+  {"$lookup": {"from": "samples", "localField": "sample_id", "foreignField": "_id", "as": "s"}},
+  {"$match": {"s.restriction": "forensic"}},
+  {"$lookup": {"from": "approvals", "let": {"t": "$transfer_id"},
+               "pipeline": [{"$match": {"$expr": {"$and": [{"$eq": ["$transfer_id", "$$t"]},
+                                                          {"$eq": ["$status", "approved"]}]}}}],
+               "as": "appr"}},
+  {"$match": {"appr": {"$size": 0}}}
 ]
 ```
 Should return zero rows. Show that live: it's the proof the gate works.
@@ -571,17 +494,9 @@ Should return zero rows. Show that live: it's the proof the gate works.
 3. Run:
 ```python
 [
-    {
-        "$vectorSearch": {
-            "index": "ledger_vector",
-            "path": "embedding",
-            "queryVector": qv,
-            "numCandidates": 200,
-            "limit": 20,
-            "filter": filters,
-        }
-    },
-    {"$project": {"embedding": 0, "score": {"$meta": "vectorSearchScore"}}},
+  {"$vectorSearch": {"index": "ledger_vector", "path": "embedding", "queryVector": qv,
+                     "numCandidates": 200, "limit": 20, "filter": filters}},
+  {"$project": {"embedding": 0, "score": {"$meta": "vectorSearchScore"}}}
 ]
 ```
 4. For questions that map to a canned aggregation (gaps, restricted-without-supervisor, exposure), route to that aggregation instead; it's exact and more convincing.
