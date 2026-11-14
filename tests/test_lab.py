@@ -129,3 +129,36 @@ def test_deliver_gives_up_if_the_courier_never_arrives_and_does_not_touch_the_st
         run(go())
     assert e.value.status_code == 409 and "arrive" in e.value.detail
     assert [s["type"] for s in scans] == ["checkout", "handoff"]
+
+
+def test_return_to_storage_reroutes_a_courier_already_underway_then_checks_in():
+    lab, scans = build()
+    refs = {"transfer_id": "TR-1", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3"}
+
+    async def go():
+        await lab.call("request_courier", {"from": "FZ-B", "to": "SEQ-3"}, "c-1", refs)
+        await lab.call("checkout_sample", {"sample_id": "TS-1042"}, "c-2", refs)
+        await lab.call("handoff_to_courier", {"transfer_id": "TR-1"}, "c-3", refs)
+        await lab.sleep(2)  # halfway to the station
+        return await lab.call(
+            "return_to_storage", {"sample_id": "TS-1042", "freezer_id": "FZ-B"}, "c-4", refs
+        )
+
+    run(go())
+    assert [(s["type"], s["correlation_id"]) for s in scans][-1] == ("checkin", "c-4")
+    assert scans[-1]["location_id"] == "FZ-B"
+
+
+def test_return_to_storage_before_pickup_just_checks_the_sample_back_in():
+    lab, scans = build()
+    refs = {"transfer_id": "TR-1", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3"}
+
+    async def go():
+        await lab.call("request_courier", {"from": "FZ-B", "to": "SEQ-3"}, "c-1", refs)
+        await lab.call("checkout_sample", {"sample_id": "TS-1042"}, "c-2", refs)
+        await lab.call(
+            "return_to_storage", {"sample_id": "TS-1042", "freezer_id": "FZ-B"}, "c-3", refs
+        )
+
+    run(go())
+    assert [s["type"] for s in scans] == ["checkout", "checkin"] and not lab.slept

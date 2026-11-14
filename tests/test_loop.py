@@ -97,7 +97,9 @@ def world(script, timeout=2.0):
     ex = Executor(StubGate(ledger.append), lab, ledger.append, verifier, internal=internal)
     llm = ScriptedLLM(*script)
     ctx = RunContext("agent:custody-01", "user:jlee", "GRANT-0007", "TR-1", "VR-1")
-    return AgentLoop(llm, ex, store), llm, ledger, store, ctx, notes
+    loop = AgentLoop(llm, ex, store)
+    loop.parts = {"lab": lab, "bus": bus, "ledger": ledger}
+    return loop, llm, ledger, store, ctx, notes
 
 
 HAPPY = [

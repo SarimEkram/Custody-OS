@@ -191,3 +191,10 @@ def test_unknown_tool_is_an_error_and_never_reaches_gate_or_lab():
     ex, ledger, gate = make(lab=lab)
     res = run(ex.execute(call("rm_rf"), ctx()))
     assert res.status == "ERROR" and gate.seen == [] and lab.calls == [] and ledger.entries == []
+
+
+def test_recovery_contexts_label_their_ledger_entries():
+    ex, ledger, _ = make()
+    rctx = RunContext(**CTX, refs={"sample_id": "TS-1042"}, outcome_type="compensation")
+    run(ex.execute(call("lookup_sample", sample_id="TS-1042"), rctx))
+    assert [e["entry_type"] for e in ledger.entries] == ["decision", "compensation"]
