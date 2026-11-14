@@ -55,8 +55,9 @@ def build(tts=None, approvals=None):
 
 
 def tts_client(handler):
+    transport = httpx.MockTransport(handler)
     return ElevenLabsTTS("xi-secret", "voice-1", "eleven_flash_v2_5",
-                         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))  # fmt: skip
+                         client=httpx.AsyncClient(transport=transport))  # fmt: skip
 
 
 # ---- ElevenLabs client --------------------------------------------------------------------

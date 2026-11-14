@@ -94,8 +94,8 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [ ] Rehearse beats 1–3 with the full system (blocked: A + C)
 
 **Spoken prompts (branch `feature/tts-spoken-prompts`)**
-- [ ] `ElevenLabsTTS` in `agent/voice.py` + `ELEVENLABS_TTS_*` env wiring in `agent/main.py`
-- [ ] `GET /transfers/{id}/readback/audio` and `GET /approvals/{id}/audio` (id only, server-built text, cached, 503 on TTS failure)
+- [x] `ElevenLabsTTS` in `agent/voice.py` + `ELEVENLABS_TTS_*` env wiring in `agent/main.py`
+- [x] `GET /transfers/{id}/readback/audio` and `GET /approvals/{id}/audio` (id only, server-built text, cached, 503 on TTS failure)
 - [ ] Dashboard: play on `confirmation_request` / pending approval, replay button, mute toggle
 
 **Stretch (only after the demo works)**
