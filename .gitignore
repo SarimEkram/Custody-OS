@@ -16,3 +16,4 @@ dist/
 .idea/
 .DS_Store
 .coverage
+.lab_config.json
