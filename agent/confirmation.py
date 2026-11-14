@@ -81,3 +81,13 @@ class ConfirmationService:
         transfer["readback_confirmed"] = True
         del self.pending[transfer_id]
         self.signals.signal(f"confirm:{transfer_id}", "confirmed")
+
+
+def make_request_confirmation_handler(confirmations: ConfirmationService):
+    """Executor handler for the internal request_confirmation tool."""
+
+    async def handle(args: dict, ctx) -> dict:
+        out = await confirmations.request(ctx.transfer_id, ctx.refs.get("eta_minutes"))
+        return {"status": "waiting_for_tech", **out}
+
+    return handle

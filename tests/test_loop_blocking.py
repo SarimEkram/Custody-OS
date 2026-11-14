@@ -8,8 +8,9 @@ from agent.transfers import MemoryCustodyStore
 
 
 def tc(n, name, **args):
+    arguments = json.dumps({"reason": "r", **args})
     return {"id": f"call_{n}", "type": "function",
-            "function": {"name": name, "arguments": json.dumps({"reason": "r", **args})}}  # fmt: skip
+            "function": {"name": name, "arguments": arguments}}  # fmt: skip
 
 
 def say(*calls, content=None):

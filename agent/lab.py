@@ -72,6 +72,7 @@ class LabClient:
                           "destination": args["to"], "transfer_id": refs["transfer_id"]},
                 )  # fmt: skip
                 refs["courier_job_id"] = res["job_id"]
+                refs["eta_minutes"] = res["eta_minutes"]
                 return res
             case "checkout_sample":
                 body = {"sample_id": args["sample_id"]}

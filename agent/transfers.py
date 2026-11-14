@@ -43,6 +43,18 @@ class MemoryCustodyStore:
     def create_transfer(self, doc: dict) -> None:
         self.transfers[doc["_id"]] = doc
 
+    def block(self, transfer_id: str, reason: str) -> None:
+        """Pause for approval or read-back; remembers the verified state it paused in."""
+        transfer = self.transfers[transfer_id]
+        transfer["blocked_from"], transfer["blocked_reason"] = transfer["state"], reason
+        self._move(transfer_id, TransferState.BLOCKED)
+
+    def unblock(self, transfer_id: str) -> None:
+        """Go back to the state it paused in (already scan-verified, so allowed)."""
+        transfer = self.transfers[transfer_id]
+        transfer["blocked_reason"] = None
+        self._move(transfer_id, transfer["blocked_from"])
+
     def set_state(self, transfer_id: str, state: str) -> None:
         if state in PHYSICAL:
             raise StateConflict(f"{state} can only be set by a verified scan")
