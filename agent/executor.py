@@ -47,6 +47,9 @@ class RunContext:
     request_id: str | None = None
     refs: dict = field(default_factory=dict)  # working memory: sample_id, from, to, lab ids
 
+    def __post_init__(self) -> None:
+        self.refs.setdefault("transfer_id", self.transfer_id)  # the lab client needs it
+
 
 Internal = Callable[[dict, RunContext], Awaitable[dict]]
 

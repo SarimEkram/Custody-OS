@@ -76,8 +76,10 @@ def test_handler_records_refs_only_when_the_request_is_valid():
     ctx = RunContext("agent:custody-01", "user:jlee", "GRANT-0007", "TR-1")
     out = asyncio.run(handler({**GOOD, "reason": "r"}, ctx))
     assert out["ok"] is True
-    assert ctx.refs == {"sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "window": "2 PM"}
+    parsed = {"sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "window": "2 PM"}
+    assert ctx.refs == {"transfer_id": "TR-1", **parsed}
 
     bad_ctx = RunContext("agent:custody-01", "user:jlee", "GRANT-0007", "TR-2")
     out = asyncio.run(handler({**GOOD, "sample_id": "TS-1024", "reason": "r"}, bad_ctx))
-    assert out["ok"] is False and out["problems"] and bad_ctx.refs == {}
+    assert out["ok"] is False and out["problems"]
+    assert bad_ctx.refs == {"transfer_id": "TR-2"}  # nothing from the bad parse was recorded

@@ -68,7 +68,9 @@ def world(script, timeout=2.0):
     apps = {
         "freezer": freezer_app({"TS-1042": "FZ-B"}, emit, {"FZ-B": "scanner:reader-fzB"}),
         "scheduler": scheduler_app(),
-        "courier": courier_app({("FZ-B", "SEQ-3"): 4}, {"FZ-B": "scanner:reader-fzB"}, emit, clock=clock),
+        "courier": courier_app(
+            {("FZ-B", "SEQ-3"): 4}, {"FZ-B": "scanner:reader-fzB"}, emit, clock=clock
+        ),
         "station": station_app(emit, {"SEQ-3": "scanner:reader-seq3"}),
     }  # fmt: skip
 
@@ -90,15 +92,17 @@ def world(script, timeout=2.0):
         notes.append(args["message"])
         return {"sent": True}
 
-    ex = Executor(StubGate(ledger.append), lab, ledger.append, Verifier(bus, store, ledger.append, timeout),
-                  internal={"parse_request": make_parse_handler(CATALOG, None), "notify": notify})  # fmt: skip
+    verifier = Verifier(bus, store, ledger.append, timeout)
+    internal = {"parse_request": make_parse_handler(CATALOG, None), "notify": notify}
+    ex = Executor(StubGate(ledger.append), lab, ledger.append, verifier, internal=internal)
     llm = ScriptedLLM(*script)
     ctx = RunContext("agent:custody-01", "user:jlee", "GRANT-0007", "TR-1", "VR-1")
     return AgentLoop(llm, ex, store), llm, ledger, store, ctx, notes
 
 
 HAPPY = [
-    say(tc(1, "parse_request", sample_id="TS-1042", **{"from": "FZ-B", "to": "SEQ-3"}, window="2 PM")),
+    say(tc(1, "parse_request", sample_id="TS-1042", window="2 PM",
+           **{"from": "FZ-B", "to": "SEQ-3"})),
     say(tc(2, "lookup_sample", sample_id="TS-1042"),
         tc(3, "reserve_station", station_id="SEQ-3", window="2 PM")),
     say(tc(4, "request_courier", **{"from": "FZ-B", "to": "SEQ-3"}, window="2 PM")),
