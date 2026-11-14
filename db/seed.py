@@ -13,6 +13,7 @@ import sys
 from datetime import datetime, timedelta
 
 import gridfs
+from bson import ObjectId
 from pymongo import MongoClient
 
 from agent import ledger
@@ -229,11 +230,15 @@ async def seed_history() -> None:
         event = {"scanner_id": scanner, "type": kind, "sample_id": "TS-1042", "location_id": location,
                  "from_custodian": "location:FZ-B", "to_custodian": to_cust, "correlation_id": cid,
                  "scanned_at": when}
+        event["_id"] = ObjectId()
         event["signature"] = sign_scan(event)
-        await db.custody_events.insert_one(event)  # seed runs as admin; at runtime only scanner_svc writes these
+        # The verification row goes in FIRST and names the scan: a running agent's verifier sees the scan the
+        # moment it is inserted, finds it already handled, and leaves it alone (no false violation).
         await ledger.append({**base, **tr1, "timestamp": when, "entry_type": "verification", "tool": tool,
                              "correlation_id": cid, "reversible": False, "decision": "allow",
-                             "status": "confirmed", "refs": [o_id], "summary": text}, db=db)
+                             "status": "confirmed", "refs": [o_id], "response": {"scan_id": str(event["_id"])},
+                             "summary": text}, db=db)
+        await db.custody_events.insert_one(event)  # seed runs as admin; at runtime only scanner_svc writes these
         if kind == "intake":
             await ledger.append({**base, **tr1, "timestamp": at(), "entry_type": "exposure",
                                  "correlation_id": cid, "decision": "allow", "reversible": None,

@@ -149,3 +149,26 @@ async def test_direct_db_approval_unblocks_transfer(watchers):
         tr = await agent_db().transfers.find_one({"_id": ctx.transfer_id})
         return tr["state"] == "reserved" and tr["blocked_reason"] is None
     assert await until(unblocked)
+
+
+async def test_a_scan_is_only_ever_applied_once(watchers):
+    """Replays (stream reconnects, several agent services, seeded history) must not double-apply or raise
+    false violations."""
+    ctx = await make_transfer(f"{PREFIX}6")
+    await execute("checkout_sample", {"sample_id": "TS-1042"}, "ready", ctx, FakeLab(), correlation_id="c-idem-1")
+    scan = {"scanner_id": "scanner:reader-fzb", "type": "checkout", "sample_id": "TS-1042", "location_id": "FZ-B",
+            "from_custodian": "location:FZ-B", "to_custodian": "courier:CJ-T", "correlation_id": "c-idem-1",
+            "scanned_at": utcnow().replace(microsecond=0)}
+    scan["signature"] = sign_scan(scan)
+    try:
+        await scanner_db().custody_events.insert_one(scan)  # gives it its _id
+        assert await apply_verified_scan(scan) == "checked_out"
+        before = await agent_db().ledger.count_documents({"transfer_id": ctx.transfer_id})
+        assert await apply_verified_scan(scan) == "checked_out"  # second pass: same answer
+        assert await apply_verified_scan(scan) == "checked_out"
+        assert await agent_db().ledger.count_documents({"transfer_id": ctx.transfer_id}) == before
+        rows = await agent_db().ledger.find({"transfer_id": ctx.transfer_id,
+                                             "entry_type": {"$in": ["verification", "violation"]}}).to_list()
+        assert [r["entry_type"] for r in rows] == ["verification"]  # one verification, no violation
+    finally:
+        await admin_db().custody_events.delete_many({"correlation_id": "c-idem-1"})

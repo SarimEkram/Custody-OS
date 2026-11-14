@@ -101,7 +101,10 @@ def _dashboard_view(r: dict) -> dict:
         answer = f"{len(flat)} matching record(s)."
     is_scan = lambda x: x.get("entry_type") == "scan"  # noqa: E731
     entries = [x for x in flat if "entry_type" in x and not is_scan(x)]
-    requests = [x["request"] for x in flat if isinstance(x.get("request"), dict)]
+    # Only a joined voice/typed request counts. Outcome rows also carry a `request` field (the tool call that
+    # was sent), which is not a voice request and has no _id.
+    requests = [x["request"] for x in flat
+                if isinstance(x.get("request"), dict) and "_id" in x["request"] and "transcript" in x["request"]]
     seen, uniq = set(), []
     for q in requests:
         if q.get("_id") not in seen:
