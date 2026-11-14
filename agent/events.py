@@ -56,11 +56,15 @@ class CourierTicker:
     async def tick(self) -> None:
         for job in await self.list_jobs():
             if job["status"] == "in_transit":
-                self.hub.publish({"kind": "courier_position", "data": {
+                data = {
                     "job_id": job["job_id"], "transfer_id": job["transfer_id"],
                     "sample_id": job["sample_id"], "from": job["origin"], "to": job["destination"],
                     "progress": job["progress"],
-                }})  # fmt: skip
+                }  # fmt: skip
+                for extra in ("original_to", "return_from_progress"):  # only after a reroute home
+                    if extra in job:
+                        data[extra] = job[extra]
+                self.hub.publish({"kind": "courier_position", "data": data})
 
     async def run(self) -> None:
         while True:

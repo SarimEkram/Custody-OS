@@ -20,6 +20,7 @@ import httpx
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import StreamingResponse
 
+from agent import guardrails
 from agent.atlas import AtlasExecutor, ScanApplier
 from agent.confirmation import ConfirmationService, make_request_confirmation_handler
 from agent.events import CourierTicker, EventHub, merged_stream
@@ -111,9 +112,13 @@ def build_service(b: Backends) -> Service:
         b.lab, internal, applier.bus, execute=b.execute, get_transfer=b.store.get_transfer,
         record_unverified=b.record_unverified, next_state=b.next_state, timeout=b.verify_timeout,
     )  # fmt: skip
+    async def record_abort(ctx, status: str, detail: str) -> None:
+        await b.append(guardrails.abort_entry(ctx, status, detail))
+
     loop = AgentLoop(
         b.llm, executor, b.store, signals=signals, confirmations=confirmations,
         wait_timeout=b.wait_timeout, manage_blocking=False,  # A's gate blocks and unblocks
+        on_abort=record_abort,
     )  # fmt: skip
     planner = RecoveryPlanner(
         executor, b.store, b.append, b.read_outcomes, b.job_state, b.freezer_certs,
@@ -125,7 +130,7 @@ def build_service(b: Backends) -> Service:
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
     speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
-    app = create_b_routes(intake, voice, confirmations, speech)
+    app = create_b_routes(intake, voice, confirmations, speech, requests=b.requests, audio=b.audio)
 
     def stream_events() -> AsyncIterator[dict]:
         return merged_stream(b.event_feed(), hub)
