@@ -83,6 +83,8 @@ export function normalizeCourier(raw: unknown): CourierSignal | null {
     ...(hasLeg ? { from: o.from as string, to: o.to as string } : {}),
     ...(str(o.job_id) ? { job_id: o.job_id } : {}),
     ...(str(o.sample_id) ? { sample_id: o.sample_id } : {}),
+    ...(str(o.original_to) ? { original_to: o.original_to } : {}),
+    ...(typeof o.return_from_progress === 'number' ? { return_from_progress: o.return_from_progress } : {}),
   }
 }
 

@@ -2,6 +2,9 @@
 
 **Raised by:** Person C (dashboard) · **For:** whoever picks these up (suggested owners below) · **Date:** 2026-11-14
 
+> **Update 2026-11-14:** issues 1-3 were fixed on `main` and verified from the dashboard in a real browser against the
+> real routes (35 of 35 behaviours). Only issue 4 is open. The sections for 1-3 are kept for reference.
+
 The dashboard is merged on `main` and aligned with the real backend. It was driven in a real browser against the
 backend's actual route code (in memory, Atlas never contacted): **32 of 33 behaviours work.** This file covers the
 one that doesn't, plus two smaller gaps. Nothing here needs a dashboard change to *start*: the dashboard already
@@ -9,10 +12,10 @@ calls these endpoints, shows a clear message while they're missing, and will lig
 
 | # | Issue | Suggested owner | Blocks |
 |---|---|---|---|
-| 1 | `POST /grants/{id}/reissue` does not exist | Person A (grants, ledger) | The **Restore authority** button |
-| 2 | `GET /voice/requests/{id}/audio` does not exist | Person B (voice, GridFS) | The Auditor's **Play original audio** button |
-| 3 | `courier_position` can't place the dot after a reload mid-recovery | Person B (courier, events) | Polish only |
-| 4 | Voice confirmation: `POST /transfers/{id}/confirm/voice` and a spoken "say confirm" cue | Person B (voice, confirmation) | Confirming the read-back by voice |
+| 1 | ~~`POST /grants/{id}/reissue` does not exist~~ **Done** | Person A (grants, ledger) | The **Restore authority** button |
+| 2 | ~~`GET /voice/requests/{id}/audio` does not exist~~ **Done** | Person B (voice, GridFS) | The Auditor's **Play original audio** button |
+| 3 | ~~`courier_position` can't place the dot after a reload mid-recovery~~ **Done** (`original_to`, `return_from_progress`) | Person B (courier, events) | Polish only |
+| 4 | **Open.** Voice confirmation: `POST /transfers/{id}/confirm/voice` and a spoken "say confirm" cue | Person B (voice, confirmation) | Confirming the read-back by voice |
 
 ---
 

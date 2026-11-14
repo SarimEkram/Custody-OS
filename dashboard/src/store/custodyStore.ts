@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 import { resolveCourier } from '../lib/courier'
 import { mergeById, scanKey } from '../lib/normalize'
+import { isRunEnd } from '../lib/runEnd'
 import { DEFAULT_GRANT_ID, SEED_LOCATIONS, SEED_SAMPLES } from '../lib/seed'
 import type {
   Approval,
@@ -134,7 +135,7 @@ export const useCustodyStore = create<CustodyState>((set) => ({
           if (ledger === st.ledger) return {}
           const patch: Partial<CustodyState> = { ledger }
           // A halt entry is the backend acknowledging the stop.
-          if (e.data.decision === 'halt' && st.stopPhase === 'requested') patch.stopPhase = 'idle'
+          if (e.data.decision === 'halt' && !isRunEnd(e.data) && st.stopPhase === 'requested') patch.stopPhase = 'idle'
           return patch
         }
         case 'transfer': {

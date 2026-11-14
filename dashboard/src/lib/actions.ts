@@ -2,6 +2,7 @@
 // action. Pure and derived: nothing here invents data or upgrades a status on its own.
 import type { Tone } from './format'
 import { GRANT_REISSUED } from './rules'
+import { explainRunEnd, isRunEnd, runEndStatus } from './runEnd'
 import type { LedgerEntry, OutcomeStatus, ScanEvent } from './types'
 
 export type StepState = 'done' | 'active' | 'todo' | 'failed' | 'skipped'
@@ -148,6 +149,11 @@ const EVENT_TITLES: Record<string, string> = {
 }
 
 function eventItem(e: LedgerEntry): ActionItem {
+  // A run that ended abnormally (budget, model failure, crash) is a failure, not a policy decision and not a Stop.
+  if (isRunEnd(e)) {
+    const why = explainRunEnd(runEndStatus(e))
+    return { id: e._id, kind: 'event', at: e.timestamp, entry: e, title: 'Run ended early', detail: `${why.title}. ${e.reason ?? ''}`.trim(), tone: 'warn', status: '', steps: [], physical: false, verified: false, verification: null }
+  }
   const tone: Tone =
     e.decision === 'halt' || e.entry_type === 'violation'
       ? 'bad'

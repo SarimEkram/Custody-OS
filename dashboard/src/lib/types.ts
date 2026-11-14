@@ -205,6 +205,10 @@ export interface CourierSignal {
   y?: number
   job_id?: string
   sample_id?: string
+  /** Set by the backend after a reroute home: the destination it was originally heading for. */
+  original_to?: string
+  /** ...and how far along that outbound leg it had got (0-1) when it turned back. */
+  return_from_progress?: number
 }
 
 /** Where the dashboard draws the courier (map coordinates), resolved from a CourierSignal. */
