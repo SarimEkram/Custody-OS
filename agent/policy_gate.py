@@ -28,12 +28,12 @@ from typing import Any, Literal
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict
 
-from agent import ledger
+from agent import guardrails, ledger
 from agent.config import AGENT_ID
 from agent.db import agent_db
 from agent.embeddings import vector_stage
 from agent.models import RESTRICTION_RANK, Decision, EntryType, TransferState, utcnow
-from agent.tools import ToolSpec, spec
+from agent.tools import TOOLS, ToolSpec, spec
 
 Executor = Callable[[str, dict[str, Any], str], Awaitable[dict[str, Any]]]
 """B's tool executor: (tool, args, correlation_id) -> lab service response. Must send X-Correlation-Id."""
@@ -53,6 +53,7 @@ class GateDecision(BaseModel):
     approval_id: str | None = None
     ledger_id: ObjectId
     correlation_id: str
+    reason: str = ""  # why, in words (shown to the model so it can correct itself)
 
 
 class ToolResult(BaseModel):
@@ -98,6 +99,7 @@ class GateState:
     risk_flags: list[str] = field(default_factory=list)
     mode: Literal["normal", "recovery"] = "normal"
     recovery_policy: dict | None = None
+    prior_outcomes: list[dict] = field(default_factory=list)  # this transfer's earlier outcome rows
 
 
 @dataclass
@@ -141,6 +143,17 @@ def evaluate(tool: str, args: dict, s: GateState) -> Evaluation:
         return Evaluation(Decision.halt, ["halted"], tr.get("halt_reason") or "transfer halted")
     if tr.get("state") in (TransferState.revoked, TransferState.recovering, TransferState.cancelled):
         return Evaluation(Decision.halt, ["transfer_not_active"], f"transfer is {tr.get('state')}")
+
+    # 1a. guardrails: the call must match the transfer the tech confirmed, and an irreversible
+    # step that already went out must not go out twice
+    mismatched = guardrails.bound_mismatches(tool, args, s.transfer)
+    if mismatched:
+        return Evaluation(Decision.deny, ["args_not_bound_to_transfer"],
+                          "call contradicts the confirmed transfer: " + "; ".join(mismatched))
+    if t.irreversible and any(o.get("tool") == tool and o.get("status") == "sent"
+                              for o in s.prior_outcomes):
+        return Evaluation(Decision.deny, ["duplicate_irreversible_step"],
+                          f"{tool} already went out for this transfer; it cannot be repeated")
 
     # 1b. read-back before the first irreversible step of a voice request
     if t.irreversible and tr.get("source") == "voice" and not s.has_confirmation:
@@ -262,6 +275,10 @@ async def load_state(tool: str, args: dict, ctx: RunContext) -> GateState:
         has_confirmation=has_conf or bool((transfer or {}).get("readback_confirmed")),
         approval_status=approval["status"] if approval else None,
     )
+    if ctx.mode == "normal" and spec(tool).irreversible:
+        state.prior_outcomes = [d async for d in db.ledger.find(
+            {"transfer_id": ctx.transfer_id, "entry_type": "outcome", "tool": tool, "status": "sent"},
+            projection={"tool": 1, "status": 1})]
     if ctx.mode == "recovery":
         state.recovery_policy = await _active_policy(db, "recovery")
     elif RISK_ENABLED and spec(tool).irreversible:
@@ -284,11 +301,28 @@ def _who(user: str) -> str:
 async def check(*, tool: str, args: dict, reason: str, ctx: RunContext, correlation_id: str) -> GateDecision:
     """Decide, record the decision in the ledger, and open an approval / block the transfer if needed."""
     db = agent_db()
-    s = await load_state(tool, args, ctx)
-    ev = evaluate(tool, args, s)
-    policy = s.recovery_policy if ctx.mode == "recovery" else s.policy
-    t = spec(tool)
-    sample_id = (s.sample or {}).get("_id") or args.get("sample_id")
+    s: GateState | None = None
+    refusal = guardrails.validate_call(tool, args, reason)
+    try:
+        if refusal:  # malformed: refuse before any state is loaded
+            ev = Evaluation(Decision.deny, [refusal.rule], refusal.detail)
+            policy = await _active_policy(db, "custody-default")
+        else:
+            s = await load_state(tool, args, ctx)
+            ev = evaluate(tool, args, s)
+            policy = s.recovery_policy if ctx.mode == "recovery" else s.policy
+    except Exception as e:  # noqa: BLE001 - fail closed: if the gate cannot decide, nothing runs
+        s = None
+        ev = Evaluation(Decision.deny, ["gate_unavailable"],
+                        f"the gate could not decide ({type(e).__name__}); nothing was run")
+        policy = {"policy_id": "custody-default", "version": 0}
+    t = TOOLS.get(tool)
+    sample_id = ((s.sample or {}).get("_id") if s else None) or args.get("sample_id")
+    if refusal:  # keep what the model sent visible, but bounded and storable
+        args = {str(k)[:64]: (v if isinstance(v, (bool, int, float)) or v is None else str(v)[:200])
+                for k, v in args.items()}
+        reason = reason[:500] if isinstance(reason, str) else str(reason)[:500]
+        sample_id = sample_id if isinstance(sample_id, str) and len(sample_id) <= 64 else None
 
     approval_id = None
     if ev.decision == Decision.pending_approval:
@@ -299,7 +333,7 @@ async def check(*, tool: str, args: dict, reason: str, ctx: RunContext, correlat
             approval_id = f"APR-{uuid.uuid4().hex[:6].upper()}"
             await db.approvals.insert_one({
                 "_id": approval_id, "transfer_id": ctx.transfer_id, "sample_id": sample_id,
-                "requested_for_tool": tool, "reason_requested": ",".join(ev.rule_hits + s.risk_flags),
+                "requested_for_tool": tool, "reason_requested": ",".join(ev.rule_hits + (s.risk_flags if s else [])),
                 "approver_role": "supervisor", "status": "pending", "decided_by": None, "decided_at": None,
                 "created_at": s.now, "expires_at": s.now + APPROVAL_TTL,
             })
@@ -312,13 +346,13 @@ async def check(*, tool: str, args: dict, reason: str, ctx: RunContext, correlat
     ledger_id = await ledger.append({
         "entry_type": EntryType.decision, "transfer_id": ctx.transfer_id, "sample_id": sample_id,
         "request_id": ctx.request_id, "correlation_id": correlation_id, "actor": ctx.actor,
-        "on_behalf_of": ctx.on_behalf_of, "grant_id": ctx.grant_id, "grant_snapshot": _grant_snapshot(s.grant),
+        "on_behalf_of": ctx.on_behalf_of, "grant_id": ctx.grant_id, "grant_snapshot": _grant_snapshot(s.grant if s else None),
         "policy_id": policy["policy_id"], "policy_version": policy["version"], "tool": tool, "args": args,
-        "reversible": t.reversible, "reason": reason, "decision": ev.decision, "rule_hits": ev.rule_hits,
-        "risk_flags": s.risk_flags, "summary": summary, "response": {"gate_reason": ev.reason},
+        "reversible": t.reversible if t else None, "reason": reason, "decision": ev.decision,
+        "rule_hits": ev.rule_hits, "risk_flags": s.risk_flags if s else [], "summary": summary, "response": {"gate_reason": ev.reason},
     })
 
-    if ev.decision in (Decision.pending_approval, Decision.pending_confirmation) and s.transfer:
+    if ev.decision in (Decision.pending_approval, Decision.pending_confirmation) and s and s.transfer:
         blocked_reason = "approval_pending" if ev.decision == Decision.pending_approval else "readback_pending"
         current = s.transfer.get("state")
         update: dict[str, Any] = {"state": TransferState.blocked, "blocked_reason": blocked_reason,
@@ -331,8 +365,8 @@ async def check(*, tool: str, args: dict, reason: str, ctx: RunContext, correlat
         await db.transfers.update_one({"_id": ctx.transfer_id}, {"$set": update, **({"$push": push} if push else {})})
 
     return GateDecision(decision=ev.decision, policy_id=policy["policy_id"], policy_version=policy["version"],
-                        rule_hits=ev.rule_hits, risk_flags=s.risk_flags, approval_id=approval_id,
-                        ledger_id=ledger_id, correlation_id=correlation_id)
+                        rule_hits=ev.rule_hits, risk_flags=s.risk_flags if s else [], approval_id=approval_id,
+                        ledger_id=ledger_id, correlation_id=correlation_id, reason=ev.reason)
 
 
 _STATUS = {Decision.deny: "DENIED", Decision.halt: "HALTED", Decision.pending_approval: "PENDING_APPROVAL",
@@ -349,13 +383,13 @@ async def execute(tool: str, args: dict[str, Any], reason: str, ctx: RunContext,
                   *, correlation_id: str | None = None) -> ToolResult:
     """The only way the agent touches a lab system. Gate first; executor only on allow."""
     cid = correlation_id or f"c-{uuid.uuid4().hex[:8]}"
-    t = spec(tool)
     d = await check(tool=tool, args=args, reason=reason, ctx=ctx, correlation_id=cid)
     if d.decision != Decision.allow:
         return ToolResult(status=_STATUS[d.decision], tool=tool, correlation_id=cid, rule_hits=d.rule_hits,
                           approval_id=d.approval_id, decision_id=d.ledger_id,
-                          message=f"{_STATUS[d.decision]} ({', '.join(d.rule_hits)}). {_ADVICE[d.decision]}")
+                          message=f"{_STATUS[d.decision]} ({', '.join(d.rule_hits)}): {d.reason}. {_ADVICE[d.decision]}")
 
+    t = spec(tool)  # only reached on allow, so the tool is known
     entry_type = EntryType.outcome
     if ctx.mode == "recovery":
         entry_type = EntryType.recovery if tool == "return_to_storage" else EntryType.compensation
