@@ -135,3 +135,26 @@ describe('courier after a reroute home carries original_to and return_from_progr
     expect([p.x, p.y]).toEqual([185, 210])
   })
 })
+
+describe('grant list follows the ledger live', () => {
+  const g = (id: string, status: 'active' | 'revoked') => ({ _id: id, grantor: 'user:jlee', grantee: 'agent:custody-01', status })
+  const reissue = row({ entry_type: 'correction', actor: 'user:mokafor', grant_id: 'GRANT-0008', rule_hits: ['grant_reissued'], response: { supersedes: 'GRANT-0007', expires_at: '2026-11-14T21:00:00Z' } })
+
+  it('a re-issue makes the new grant active and keeps the old one revoked, without a new request', async () => {
+    const { applyGrantEvidence, currentGrant } = await import('./authority')
+    const next = applyGrantEvidence({ 'GRANT-0007': g('GRANT-0007', 'revoked') }, reissue)
+    expect(next['GRANT-0008'].status).toBe('active')
+    expect(next['GRANT-0008'].supersedes).toBe('GRANT-0007')
+    expect(next['GRANT-0007'].status).toBe('revoked')
+    expect(currentGrant(next)?._id).toBe('GRANT-0008')
+  })
+
+  it('a revoke halt marks that grant revoked, and ignores unrelated rows', async () => {
+    const { applyGrantEvidence, currentGrant } = await import('./authority')
+    const start = { 'GRANT-0007': g('GRANT-0007', 'active') }
+    const next = applyGrantEvidence(start, row({ decision: 'halt', actor: 'system:watcher', rule_hits: ['grant_revoked'] }))
+    expect(next['GRANT-0007'].status).toBe('revoked')
+    expect(currentGrant(next)).toBeUndefined()
+    expect(applyGrantEvidence(start, row())).toBe(start)
+  })
+})
