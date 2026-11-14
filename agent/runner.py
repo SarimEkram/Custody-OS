@@ -65,7 +65,9 @@ class Runner:
         text = (
             f'The tech said: <untrusted>"{said}"</untrusted>\n'
             f"Validated: move {t['sample_id']} from {t['from']} to {t['to']}"
-            + (f", window {t['window']}" if t.get("window") else "")
+            # No time said means "now": without this the model stops to ask for a window, and a run
+            # cannot ask the tech anything, so the transfer was cancelled before it started.
+            + (f", window {t['window']}" if t.get("window") else ", window ASAP (none requested)")
             + "."
         )
         loop_task = asyncio.ensure_future(self.loop.run(text, ctx))

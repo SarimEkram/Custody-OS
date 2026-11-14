@@ -2,6 +2,7 @@
 
 Usage:  python -m db.seed            upsert reference data (people, grant, samples, locations, policies, incidents)
         python -m db.seed --reset    also wipe demo-mutable collections and re-add the "earlier today" history
+        add --no-history to start blank: no past requests, ledger rows or scans (auditor view empty)
 
 Person C owns extending this (more history, voice requests); keep it passing the validators in db/validators/.
 """
@@ -268,7 +269,8 @@ def main() -> None:
     if "--reset" in sys.argv:
         reset_mutable(db)
     upsert_reference(db)
-    if "--reset" in sys.argv or db.ledger.estimated_document_count() == 0:
+    wants_history = "--reset" in sys.argv or db.ledger.estimated_document_count() == 0
+    if wants_history and "--no-history" not in sys.argv:
         asyncio.run(seed_history())
     print("done")
 

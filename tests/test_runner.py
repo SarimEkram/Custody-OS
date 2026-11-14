@@ -115,3 +115,13 @@ def test_background_start_runs_the_transfer_and_keeps_a_crash_instead_of_swallow
     boom, loop, _ = build(error=RuntimeError("model exploded"))
     failed = asyncio.run(go(boom))
     assert str(failed.errors["TR-1"]) == "model exploded"
+
+
+def test_a_request_without_a_time_tells_the_model_the_window_is_asap():
+    # otherwise the model stops to ask for a time window, which no one can answer mid-run
+    runner, loop, _ = build(window=None)
+    run(runner)
+    assert "window ASAP" in loop.ran[0][0]
+    runner, loop, _ = build(window="2 PM")
+    run(runner)
+    assert "window 2 PM" in loop.ran[0][0] and "ASAP" not in loop.ran[0][0]
