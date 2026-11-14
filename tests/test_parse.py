@@ -83,3 +83,38 @@ def test_handler_records_refs_only_when_the_request_is_valid():
     out = asyncio.run(handler({**GOOD, "sample_id": "TS-1024", "reason": "r"}, bad_ctx))
     assert out["ok"] is False and out["problems"]
     assert bad_ctx.refs == {"transfer_id": "TR-2"}  # nothing from the bad parse was recorded
+
+
+def one(result, field_name):
+    return next(p for p in result.problems if p["field"] == field_name)
+
+
+def test_unknown_sample_offers_the_closest_real_ids():
+    p = one(validate_parse({**GOOD, "sample_id": "TS-1024"}, CATALOG, None), "sample_id")
+    assert p["suggestions"][0] == "TS-1042" and "EV-2201" not in p["suggestions"]
+    assert p["message"].startswith("I can't find TS-1024. Did you mean TS-1042")
+
+
+def test_unknown_location_offers_the_closest_real_locations():
+    p = one(validate_parse({**GOOD, "from": "FZ-C"}, CATALOG, None), "from")
+    assert "FZ-B" in p["suggestions"] and "SEQ-3" not in p["suggestions"]
+    assert "I can't find FZ-C" in p["message"]
+
+
+def test_nothing_close_means_no_suggestion_and_no_dangling_question():
+    p = one(validate_parse({**GOOD, "sample_id": "ZZZ"}, CATALOG, None), "sample_id")
+    assert p["suggestions"] == [] and p["message"] == "I can't find ZZZ."
+
+
+def test_shaky_hearing_asks_the_tech_to_confirm_what_it_thinks_it_heard():
+    p = one(validate_parse(GOOD, CATALOG, words(**{"TS-1042": -2.0})), "sample_id")
+    assert p["suggestions"] == ["TS-1042"]
+    assert p["message"] == "I'm not sure I heard TS-1042 correctly. Did you mean TS-1042?"
+
+
+def test_missing_and_inconsistent_requests_get_plain_messages():
+    r = validate_parse({"sample_id": "TS-1042", "from": "FZ-A"}, CATALOG, None)
+    assert one(r, "to")["message"] == "I didn't catch the destination."
+    assert one(r, "from")["message"] == "TS-1042 is in Freezer B, not Freezer A."
+    r = validate_parse({**GOOD, "to": "FZ-B"}, CATALOG, None)
+    assert one(r, "to")["message"] == "The destination is the same as the source."
