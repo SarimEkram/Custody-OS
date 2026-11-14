@@ -37,6 +37,12 @@ class MemoryCustodyStore:
     def __init__(self, samples: dict[str, dict], transfers: dict[str, dict]) -> None:
         self.samples, self.transfers = samples, transfers
 
+    def next_transfer_id(self) -> str:
+        return f"TR-{len(self.transfers) + 1}"
+
+    def create_transfer(self, doc: dict) -> None:
+        self.transfers[doc["_id"]] = doc
+
     def set_state(self, transfer_id: str, state: str) -> None:
         if state in PHYSICAL:
             raise StateConflict(f"{state} can only be set by a verified scan")
