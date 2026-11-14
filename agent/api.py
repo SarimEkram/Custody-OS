@@ -8,6 +8,8 @@ Routes (dashboard calls them through the Vite proxy as /api/...):
     POST /approvals/{id}              supervisor approve/deny
     POST /grants/{id}/revoke          revoke a grant (uses admin_svc)
     POST /control/stop                Stop switch (all, or one transfer)
+    GET  /state                       snapshot for the dashboard (re-sync after an SSE drop)
+    GET  /health                      liveness + MongoDB ping
     GET  /stream                      SSE: {kind, data} for ledger/transfer/scan/approval changes
     POST /audit/query                 plain-English auditor question
     GET  /audit/chain/{sample_id}     custody chain timeline
@@ -19,6 +21,7 @@ Routes (dashboard calls them through the Vite proxy as /api/...):
 from __future__ import annotations
 
 import json
+import os
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -27,6 +30,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from agent import audit
 from agent.control import press_stop, revoke_grant
+from agent.db import agent_db
 from agent.policy_gate import confirm_readback, decide_approval
 from agent.watchers import event_feed, jsonable
 
@@ -103,6 +107,16 @@ def _dashboard_view(r: dict) -> dict:
             "gaps": flat if route == "gaps" else []}
 
 
+async def _requests_for(entries: list[dict], already: list[dict]) -> list[dict]:
+    """The original voice/typed requests behind these ledger entries (the timeline starts from them)."""
+    have = {q.get("_id") for q in already}
+    ids = sorted({e["request_id"] for e in entries if e.get("request_id")} - have)
+    if not ids:
+        return already
+    found = await agent_db().voice_requests.find({"_id": {"$in": ids}}, {"words": 0}).to_list()
+    return already + jsonable(found)
+
+
 def _http(e: Exception) -> HTTPException:
     code = 403 if isinstance(e, PermissionError) else 404 if isinstance(e, LookupError) else 400
     return HTTPException(code, str(e))
@@ -139,6 +153,47 @@ async def stop(body: StopBody):
     return {"ok": True, "control_id": str(await press_stop(body.by, body.transfer_id))}
 
 
+LEDGER_SNAPSHOT_ROWS = 200
+
+
+@router.get("/health")
+async def health():
+    """Liveness plus a MongoDB ping. Always 200 so the dashboard can show which part is down."""
+    try:
+        await agent_db().command("ping")
+        mongo = "up"
+    except Exception:  # noqa: BLE001 - report, don't raise
+        mongo = "down"
+    return {"status": "ok" if mongo == "up" else "degraded", "mongo": mongo}
+
+
+@router.get("/state")
+async def state():
+    """Everything the dashboard needs to rebuild its view after an SSE reconnect (embeddings stripped)."""
+    db = agent_db()
+
+    async def rows(coll: str, query: dict | None = None, sort=None, limit: int = 500):
+        cur = db[coll].find(query or {}, {"embedding": 0})
+        if sort:
+            cur = cur.sort(*sort)
+        return await cur.limit(limit).to_list()
+
+    ledger_rows = await rows("ledger", sort=("timestamp", -1), limit=LEDGER_SNAPSHOT_ROWS)
+    ledger_rows.reverse()  # oldest first, like the live stream
+    snapshot = {
+        "transfers": await rows("transfers", sort=("updated_at", -1)),
+        "ledger": ledger_rows,
+        "scans": await rows("custody_events", sort=("scanned_at", -1), limit=LEDGER_SNAPSHOT_ROWS),
+        "approvals": await rows("approvals", sort=("created_at", -1)),
+        "samples": await rows("samples"),
+        "locations": await rows("locations"),
+        "grants": await rows("grants"),
+        "demo_scripted": os.environ.get("DEMO_SCRIPTED") == "1",
+        "demo_speed": float(os.environ.get("DEMO_SPEED", "60")),
+    }
+    return jsonable(snapshot)
+
+
 @router.get("/stream")
 async def stream():
     async def gen():
@@ -153,7 +208,9 @@ async def stream():
 async def audit_query(body: AuditQuery):
     """Returns A's {route, params, routed_by, rows} plus the dashboard's {answer, mode, entries, scans, ...}."""
     r = await audit.ask(body.question)
-    return {**r, **_dashboard_view(r)}
+    view = _dashboard_view(r)
+    view["requests"] = await _requests_for(view["entries"], view["requests"])
+    return {**r, **view}
 
 
 @router.get("/audit/chain/{sample_id}")

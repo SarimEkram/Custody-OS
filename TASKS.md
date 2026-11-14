@@ -20,7 +20,6 @@ Who is waiting on whom. Remove a line once it's resolved.
 
 | Waiting | On | For what |
 |---|---|---|
-| A | B | Groq API key, to test the auditor's LLM routing. **B has it in B's `.env`; B sends it to A privately (never through git)** |
 | A | B + C | Running services and dashboard, to rehearse demo beats 1–3 |
 | A | C | Auditor panel calling `/api/audit/*`, to check the results look right on screen |
 | B | A + C | Agree a time for the first live end-to-end run (it needs `python -m db.seed --reset`, which resets everyone's data) |
@@ -51,12 +50,14 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] Watcher also unblocks a transfer when an approval changes directly in the DB (safety net)
 - [x] Seed bug: scanner `location_id`s fixed in `db/seed.py` and in the live data (`FZ-A`, `SEQ-3`, ...)
 - [x] API accepts C's dashboard request bodies and returns the dashboard's audit fields (`agent/api.py`)
+- [x] Review of B's merged code against the rules and the gate contract: no violations
+- [x] `GET /state` and `GET /health` for the dashboard (`agent/api.py`)
 - [x] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
 - [x] Install `mongosh`, rehearse beat 4 (`db/BEAT4_CHEATSHEET.md`)
-- [ ] Test auditor LLM routing (blocked: B, needs the Groq key)
+- [x] Test auditor LLM routing: 6 demo questions all routed correctly by the LLM (`routed_by: llm`), 0.5-2 s each
 - [ ] Gate + verifier end to end with the real agent (B's agent loop is on `main` now; needs a live run)
 - [ ] Rehearse beats 1–3 with the full system (blocked: B + C)
-- [ ] Check auditor results in the dashboard (blocked: C, needs the auditor panel)
+- [x] Check auditor results in the dashboard: ran the real agent + dashboard proxy; responses match C's `AuditResult`; added the original request (`requests`) so the timeline starts from it. Still to eyeball in a browser after the live run
 
 **Stretch (only after the demo works)**
 - [ ] Gate-signed token that lab services verify

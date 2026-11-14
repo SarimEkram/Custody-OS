@@ -1,10 +1,12 @@
 import { Loader2, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { ApiError, auditQuery } from '../../lib/api'
+import { ApiError, auditQuery, auditTransfer } from '../../lib/api'
 import { localAudit } from '../../lib/auditLocal'
 import { groupLedger } from '../../lib/actions'
 import { formatTime, toolLabel } from '../../lib/format'
-import type { AuditResult, LedgerEntry } from '../../lib/types'
+import { findingsFrom } from '../../lib/findings'
+import { requestsFromTrace, transfersMissingRequests } from '../../lib/requests'
+import type { AuditResult, LedgerEntry, VoiceRequestDoc } from '../../lib/types'
 import { useCustodyStore } from '../../store/custodyStore'
 import { EvidenceDrawer } from '../ledger/EvidenceDrawer'
 import { Badge, Mono, toneText } from '../ui/Badge'
@@ -28,6 +30,17 @@ export function AuditorPanel() {
   const [source, setSource] = useState<'service' | 'local' | null>(null)
   const [sampleFilter, setSampleFilter] = useState('')
   const [open, setOpen] = useState<LedgerEntry | null>(null)
+  const [fetched, setFetched] = useState<VoiceRequestDoc[]>([])
+
+  // The custody-chain query returns ledger rows without the original request. The transfer trace has it,
+  // so fetch it for the transfers on screen. Best effort: the timeline works without it.
+  const loadMissingRequests = async (res: AuditResult) => {
+    const ids = transfersMissingRequests(res.entries, res.requests ?? [])
+    if (ids.length === 0) return
+    const traces = await Promise.allSettled(ids.map((id) => auditTransfer(id)))
+    const docs = traces.flatMap((t) => (t.status === 'fulfilled' ? requestsFromTrace(t.value) : []))
+    if (docs.length > 0) setFetched(docs)
+  }
 
   const run = async (q: string) => {
     const text = q.trim()
@@ -36,9 +49,12 @@ export function AuditorPanel() {
     setLoading(true)
     setError(null)
     setSampleFilter('')
+    setFetched([])
     try {
-      setResult(await auditQuery(text, identityId))
+      const res = await auditQuery(text, identityId)
+      setResult(res)
       setSource('service')
+      void loadMissingRequests(res)
     } catch (e) {
       if (e instanceof ApiError && (e.kind === 'not_implemented' || e.kind === 'network')) {
         const st = useCustodyStore.getState()
@@ -58,7 +74,12 @@ export function AuditorPanel() {
   const shown = useMemo(() => (sampleFilter ? entries.filter((e) => e.sample_id === sampleFilter) : entries), [entries, sampleFilter])
   const items = useMemo(() => groupLedger(shown, result?.scans ?? []), [shown, result])
   const shownScans = (result?.scans ?? []).filter((s) => !sampleFilter || s.sample_id === sampleFilter)
-  const requests = (result?.requests ?? []).filter((r) => shown.some((e) => e.request_id === r._id) || !sampleFilter)
+  const allRequests = useMemo(() => {
+    const seen = new Set<string>()
+    return [...(result?.requests ?? []), ...fetched].filter((r) => (seen.has(r._id) ? false : (seen.add(r._id), true)))
+  }, [result, fetched])
+  const requests = allRequests.filter((r) => shown.some((e) => e.request_id === r._id) || !sampleFilter)
+  const findings = useMemo(() => findingsFrom(result), [result])
   const timelineScans = sampleFilter || samples.length <= 1 ? shownScans : []
 
   return (
@@ -100,7 +121,7 @@ export function AuditorPanel() {
             {result.answer && <span className="text-muted">{result.answer}</span>}
           </div>
           <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(240px,1fr)_2fr]">
-            <Panel title={`Results (${items.length})`} bodyClass="p-0 overflow-y-auto" className="min-h-64">
+            <Panel title={`Results (${items.length + findings.length})`} bodyClass="p-0 overflow-y-auto" className="min-h-64">
               {samples.length > 1 && (
                 <div className="flex flex-wrap gap-1.5 border-b border-line p-2">
                   <button onClick={() => setSampleFilter('')} className={`rounded px-2 py-0.5 text-xs ${!sampleFilter ? 'bg-info text-bg' : 'bg-panel'}`}>All</button>
@@ -109,9 +130,32 @@ export function AuditorPanel() {
                   ))}
                 </div>
               )}
-              {entries.length === 0 ? (
+              {findings.length > 0 && (
+                <ul className="p-1.5" aria-label="Findings">
+                  {findings.map((f) => (
+                    <li key={f.id}>
+                      <details className="group rounded-lg px-3 py-2 hover:bg-panel">
+                        <summary className="flex cursor-pointer list-none flex-col gap-0.5">
+                          <span className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="text-sm font-medium">{f.title}</span>
+                            <span className={`text-xs font-medium ${toneText[f.tone]}`}>{f.kind === 'gap' ? 'No scan' : f.tone === 'bad' ? 'Over limit' : 'Within limit'}</span>
+                          </span>
+                          <span className="text-xs text-muted">{f.detail}</span>
+                        </summary>
+                        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                          {f.facts.map(([k, v]) => (<div key={k} className="contents"><dt className="text-muted">{k}</dt><dd className="break-all">{v}</dd></div>))}
+                        </dl>
+                        {f.sampleId && (
+                          <button onClick={() => void run(`What happened to ${f.sampleId}?`)} className="mt-2 text-xs text-info hover:underline">Open the custody chain for {f.sampleId}</button>
+                        )}
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {entries.length === 0 && findings.length === 0 ? (
                 <p className="p-4 text-sm text-ok">Zero rows. Nothing matched, which is the expected result for a clean ledger.</p>
-              ) : (
+              ) : entries.length === 0 ? null : (
                 <ul className="p-1.5">
                   {items.map((i) => (
                     <li key={i.id}>
@@ -136,7 +180,11 @@ export function AuditorPanel() {
                   <AudioEvidencePlayer request={r} />
                 </div>
               ))}
-              <CustodyTimeline entries={shown} scans={timelineScans} requests={[]} onOpen={setOpen} />
+              {findings.length > 0 && entries.length === 0 ? (
+                <p className="text-sm text-muted">These are summary findings, not individual ledger rows. Open a finding’s custody chain to see the full timeline.</p>
+              ) : (
+                <CustodyTimeline entries={shown} scans={timelineScans} requests={[]} onOpen={setOpen} />
+              )}
             </Panel>
           </div>
         </>

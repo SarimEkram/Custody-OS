@@ -2,6 +2,8 @@ import { AlertTriangle, ArrowRight, Loader2, Mic, Send } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { ApiError, sendTypedRequest, sendVoiceRequest } from '../../lib/api'
 import { useMediaRecorder } from '../../hooks/useMediaRecorder'
+import { alternativesFrom, needsClarification, problemFields, problemMessages } from '../../lib/intake'
+import { IDENTITIES } from '../../lib/seed'
 import type { IntakeResponse } from '../../lib/types'
 import { useAuthority } from '../../hooks/useAuthority'
 import { denialFor } from '../../lib/authority'
@@ -9,9 +11,6 @@ import { useCustodyStore } from '../../store/custodyStore'
 import { Badge, Mono } from '../ui/Badge'
 
 type Phase = 'idle' | 'recording' | 'uploading' | 'ready' | 'clarify' | 'error'
-
-const needsClarification = (r: IntakeResponse): boolean =>
-  r.low_confidence_terms.length > 0 || !r.transfer_id || !r.parsed.sample_id || !r.parsed.from || !r.parsed.to || (r.alternatives?.length ?? 0) > 0
 
 /** Highlights backend-reported low-confidence terms inside the transcript. */
 function Highlighted({ text, terms }: { text: string; terms: string[] }) {
@@ -35,15 +34,24 @@ export function CommandBar() {
   const identityId = useCustodyStore((s) => s.identityId)
   const setLastIntake = useCustodyStore((s) => s.setLastIntake)
   const setActiveTransfer = useCustodyStore((s) => s.setActiveTransfer)
+  const setIdentity = useCustodyStore((s) => s.setIdentity)
+  const setNoGrant = useCustodyStore((s) => s.setNoGrant)
+  const setRestoreOpen = useCustodyStore((s) => s.setRestoreOpen)
   const intake = useCustodyStore((s) => s.lastIntake)
   const ledger = useCustodyStore((s) => s.ledger)
   const scans = useCustodyStore((s) => s.scans)
   const authority = useAuthority()
+  const grantHolder = IDENTITIES.find((i) => i.role === 'lab_tech')
+  const isHolder = grantHolder?._id === identityId
   const denied = !!denialFor(ledger, scans, intake?.transfer_id)
+  const flagged = intake ? problemFields(intake) : new Set<string>()
+  const messages = intake ? problemMessages(intake) : []
+  const alternatives = intake ? alternativesFrom(intake) : []
 
   const rec = useMediaRecorder()
   const [phase, setPhase] = useState<Phase>('idle')
   const [message, setMessage] = useState<string | null>(null)
+  const noGrant = !!message && /no active grant/i.test(message)
   const [slow, setSlow] = useState(false)
   const [text, setText] = useState('')
   const [draft, setDraft] = useState('')
@@ -53,6 +61,7 @@ export function CommandBar() {
   const accept = useCallback(
     (r: IntakeResponse) => {
       setLastIntake(r)
+      setNoGrant(null) // the backend accepted a request, so there is an active grant
       setDraft(r.transcript)
       if (r.transfer_id) setActiveTransfer(r.transfer_id)
       if (r.error) {
@@ -63,15 +72,19 @@ export function CommandBar() {
         setMessage(null)
       }
     },
-    [setActiveTransfer, setLastIntake],
+    [setActiveTransfer, setLastIntake, setNoGrant],
   )
 
   const fail = useCallback((e: unknown, voice: boolean) => {
     const base = e instanceof ApiError ? e.message : 'Unexpected error.'
+    if (e instanceof ApiError && e.status === 403 && /no active grant/i.test(e.message)) {
+      const holder = useCustodyStore.getState().identityId === IDENTITIES.find((i) => i.role === 'lab_tech')?._id
+      if (holder) setNoGrant(new Date().toISOString()) // the person who holds the grant has none: revoked or expired
+    }
     setPhase('error')
     setMessage(voice ? `${base} You can type the request instead.` : base)
     if (voice) typedRef.current?.focus()
-  }, [])
+  }, [setNoGrant])
 
   // Nudge after 5 s of waiting on transcription (DEMO.md voice safety).
   useEffect(() => {
@@ -216,7 +229,23 @@ export function CommandBar() {
       {message && (
         <div role="alert" className="slot-in mt-3 flex items-start gap-2 rounded-lg bg-bad/10 px-3 py-2 text-sm text-bad ring-1 ring-bad/30">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden />
-          <span>{message}</span>
+          <span className="flex-1">
+            {message}
+            {noGrant && (
+              <span className="mt-1 block text-[13px] text-muted">
+                {isHolder
+                  ? 'Your grant is no longer active (revoked or expired), so the agent can\u2019t act for you. A supervisor can restore it.'
+                  : 'The agent only acts for people who have delegated to it, and the backend checks that. Send the request as the person holding the grant.'}
+              </span>
+            )}
+          </span>
+          {noGrant && (isHolder ? (
+            <button onClick={() => setRestoreOpen(true)} className="shrink-0 rounded-lg bg-warn px-3 py-1 text-[13px] font-medium text-bg hover:brightness-110">Restore authority</button>
+          ) : grantHolder && (
+            <button onClick={() => { setIdentity(grantHolder._id); setMessage(null) }} className="shrink-0 rounded-lg bg-warn px-3 py-1 text-[13px] font-medium text-bg hover:brightness-110">
+              Switch to {grantHolder.name}
+            </button>
+          ))}
         </div>
       )}
 
@@ -225,10 +254,11 @@ export function CommandBar() {
           <span className="text-muted">Heard</span>
           <span className="font-medium"><Highlighted text={`“${intake.transcript}”`} terms={intake.low_confidence_terms} /></span>
           <span className="flex items-center gap-1.5 text-muted">
-            {intake.parsed.sample_id ? <Mono className="text-fg">{intake.parsed.sample_id}</Mono> : <span className="text-warn">sample not found</span>}
-            {intake.parsed.from ? <Mono>{intake.parsed.from}</Mono> : <span className="text-warn">from?</span>}
+            {intake.parsed.sample_id ? <Mono className={flagged.has('sample_id') ? 'text-warn line-through decoration-dotted' : 'text-fg'}>{intake.parsed.sample_id}</Mono> : <span className="text-warn">sample?</span>}
+            {flagged.has('sample_id') && <span className="text-warn">not found</span>}
+            {intake.parsed.from ? <Mono className={flagged.has('from') ? 'text-warn' : ''}>{intake.parsed.from}</Mono> : <span className="text-warn">from?</span>}
             <ArrowRight size={13} aria-hidden />
-            {intake.parsed.to ? <Mono>{intake.parsed.to}</Mono> : <span className="text-warn">to?</span>}
+            {intake.parsed.to ? <Mono className={flagged.has('to') ? 'text-warn' : ''}>{intake.parsed.to}</Mono> : <span className="text-warn">to?</span>}
           </span>
           {denied ? <Badge tone="bad" label="Denied by policy" /> : phase === 'clarify' ? <Badge tone="warn" icon={AlertTriangle} label="Needs clarification" /> : phase === 'ready' ? <Badge tone="ok" label="Understood" /> : null}
         </div>
@@ -236,8 +266,14 @@ export function CommandBar() {
 
       {intake && phase === 'clarify' && (
         <div className="slot-in mt-3 space-y-2.5 rounded-xl bg-panel/70 p-3.5 ring-1 ring-warn/30">
-          <p className="text-sm text-warn">I can’t be sure about every part of that, so I won’t guess. Pick or correct it, then resubmit.</p>
-          {intake.alternatives?.map((a) => (
+          {messages.length > 0 ? (
+            <ul className="space-y-1 text-sm text-warn">
+              {messages.map((m) => <li key={m}>{m}</li>)}
+            </ul>
+          ) : (
+            <p className="text-sm text-warn">I can’t be sure about every part of that, so I won’t guess. Pick or correct it, then resubmit.</p>
+          )}
+          {alternatives.map((a) => (
             <div key={a.field} className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-muted">Did you mean ({a.field.replace('_id', '')}):</span>
               {a.options.map((o) => (

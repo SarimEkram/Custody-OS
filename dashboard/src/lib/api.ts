@@ -1,7 +1,7 @@
 // The ONLY module that talks to the agent service. The browser never contacts
 // MongoDB or ElevenLabs. Base URL defaults to /api (Vite proxies it to :8000 and
 // strips the prefix, so /api/voice/requests → FastAPI POST /voice/requests).
-import type { AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
+import type { AudioVerification, AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? '/api'
 
@@ -105,6 +105,12 @@ export const auditQuery = (question: string, userId: string) =>
     entries: r.entries ?? [],
   }))
 
+/** Every ledger row for a transfer, each joined to the original request (`request`). */
+export const auditTransfer = (transferId: string) => request<unknown[]>(`/audit/transfer/${encodeURIComponent(transferId)}`)
+
+/** Re-hashes the stored audio and compares it with the hash recorded at intake. Done by the backend, not here. */
+export const verifyAudio = (requestId: string) => request<AudioVerification>(`/audit/requests/${encodeURIComponent(requestId)}/verify`)
+
 export const voiceAudioUrl = (requestId: string): string =>
   `${API_BASE}/voice/requests/${encodeURIComponent(requestId)}/audio`
 
@@ -123,11 +129,14 @@ export async function getSnapshot(): Promise<Snapshot | null> {
   }
 }
 
-/** Expected: GET /health. */
-export async function checkHealth(): Promise<'up' | 'down' | 'unknown'> {
+/**
+ * GET /health. The backend answers 200 even when MongoDB is down, with `{status: "degraded", mongo: "down"}`
+ * so the dashboard can show which part is unhealthy. A bare 200 therefore does not mean healthy.
+ */
+export async function checkHealth(): Promise<'up' | 'degraded' | 'down' | 'unknown'> {
   try {
-    await request<unknown>('/health')
-    return 'up'
+    const h = await request<{ status?: string } | undefined>('/health')
+    return h && typeof h === 'object' && typeof h.status === 'string' && h.status !== 'ok' ? 'degraded' : 'up'
   } catch (e) {
     if (e instanceof ApiError && e.kind === 'not_implemented') return 'unknown'
     return 'down'
