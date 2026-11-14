@@ -27,7 +27,7 @@ class Lab:
         self.calls, self.error = [], error
 
     async def call(self, tool, args, correlation_id, refs):
-        self.calls.append((tool, correlation_id, len(ledger_len_probe)))
+        self.calls.append((tool, correlation_id))
         if self.error:
             raise self.error
         return {"ok": True, "tool": tool}
@@ -57,7 +57,6 @@ class Gate:
         return GateDecision(decision=self.decision, policy_id="p", policy_version=1, ledger_id=lid)
 
 
-ledger_len_probe: list = []
 CTX = dict(actor="agent:custody-01", on_behalf_of="user:jlee", grant_id="GRANT-0007",
            transfer_id="TR-1", request_id="VR-1")  # fmt: skip
 
@@ -68,11 +67,10 @@ def ctx():
 
 def make(decision="allow", lab=None, verifier=None, internal=None):
     ledger = Ledger()
-    ledger_len_probe.clear()
-    ledger_len_probe.extend([])
     gate = Gate(ledger, decision)
+    cids = iter(["c-1", "c-2", "c-3"])
     ex = Executor(gate=gate, lab=lab or Lab(), append=ledger.append, verifier=verifier,
-                  internal=internal or {}, new_cid=iter(["c-1", "c-2", "c-3"]).__next__)  # fmt: skip
+                  internal=internal or {}, new_cid=lambda: next(cids))  # fmt: skip
     return ex, ledger, gate
 
 
@@ -186,3 +184,10 @@ def test_stub_gate_always_allows_and_logs_its_decision_first():
     assert (
         ledger.entries[0]["entry_type"] == "decision" and ledger.entries[0]["decision"] == "allow"
     )
+
+
+def test_unknown_tool_is_an_error_and_never_reaches_gate_or_lab():
+    lab = Lab()
+    ex, ledger, gate = make(lab=lab)
+    res = run(ex.execute(call("rm_rf"), ctx()))
+    assert res.status == "ERROR" and gate.seen == [] and lab.calls == [] and ledger.entries == []
