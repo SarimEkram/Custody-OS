@@ -4,9 +4,10 @@ Lab systems are independent of the database on purpose: they read this file, nev
 they hold no DB credentials. `scripts/export_lab_config.py` regenerates it (run it after the
 seed or a reset). The scanner reads the same file for its known readers and samples.
 
-Reader identities in the seed carry location ids with typos (`FZA`, `SEQ3`, ...). A reader
-resolves to a real location by exact id, or by id with hyphens removed when that is unique;
-anything else is listed in `unresolved_readers` and never guessed.
+A reader resolves to a real location by exact id. As a safety net for hand-edited data, an id
+that matches a real location once hyphens are removed (`SEQ3` -> `SEQ-3`) is accepted when
+that is unique; anything else is listed in `unresolved_readers` and never guessed. (The seed
+itself used to produce such ids; that is fixed in `db/seed.py`.)
 """
 
 import json

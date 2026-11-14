@@ -51,10 +51,18 @@ Lab systems read `.lab_config.json`, never Atlas. Only the scanner holds a DB us
 `DEMO_SCRIPTED=1 DEMO_SCRIPT=demo/script.json`: the loop, gate, lab and scanner stay real; only the model is replayed
 (`agent/scripted.py`; `RecordingLLM` saves a good live run). One script is one stream of replies across runs.
 
+## Seed fix: scanner reader locations
+
+`db/seed.py` built each reader's `location_id` with `suffix.upper()`, so `scanner:reader-fza` sat at `FZA`, a location
+that does not exist (real ids: `FZ-A`, `FZ-B`, `CORR-1`, `SEQ-3`, `FOR-LAB`). The scanner rejects a scan whose reader is
+not at the location it reports, so this would have refused every real scan. Fixed in the seed (explicit reader ->
+location map; `tests/test_seed_data.py` guards it) and applied to the live cluster for those five documents. Reader ids
+did not change. After `python -m db.seed --reset` the data is correct; `export_lab_config.py` should report no
+unresolved readers. `services/config.py` still falls back to a hyphen-insensitive match for any stray reader and
+lists the ones it cannot place.
+
 ## Known gaps
 
-- Seed: `identities` scanner readers carry `location_id` typos (`FZA`, `SEQ3`...). `services/config.py` resolves them
-  by hyphen-insensitive match and lists any it cannot resolve; please fix the seed.
 - The requested window stays text ("2 PM"); nothing schedules by time yet.
 - No resume token on the scan feed or crash-resume of an interrupted transfer (stretch items).
 - Text-to-speech read-backs not built (stretch). Groq's free tier is rate-limited (~30 req/min, 8k tokens/min).
