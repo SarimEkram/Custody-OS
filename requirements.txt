@@ -5,3 +5,4 @@ uvicorn
 pytest
 pytest-cov
 ruff
+python-multipart
