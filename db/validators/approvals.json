@@ -1,0 +1,10 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": ["transfer_id", "requested_for_tool", "status", "created_at"],
+    "properties": {
+      "status": { "enum": ["pending", "approved", "denied"] },
+      "decided_by": { "bsonType": ["string", "null"], "pattern": "^user:" }
+    }
+  }
+}
