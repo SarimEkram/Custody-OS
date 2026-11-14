@@ -17,6 +17,12 @@ Options (env vars): `PORT` (default 8000), `MOCK_SPEED` (default 1; `2` = twice 
 
 ## What it simulates
 
+It now speaks the **real backend's shapes** (checked by running the backend's own route code), so what works here
+works there: `confirmation_request` is `{id, transfer_id, text}`, `courier_position` is progress along the current
+leg with no coordinates (and `from === to` on the recovery leg), intake explains problems in `problems[]`, a
+requester with no active grant gets `403 "<user> has no active grant for the agent"` before anything is stored, only
+the requester can confirm, and audit queries return the same row shapes as the real pipelines.
+
 It follows the documented contracts: a decision entry is written before each action, the outcome is
 `sent`, a scanner event arrives about a second later, then a verification entry. State only advances
 after the scan.
@@ -26,12 +32,14 @@ after the scan.
 | `GET /stream` | SSE with `{kind, data}` messages (`ledger`, `transfer`, `scan`, `approval`, `confirmation_request`, `courier_position`) |
 | `GET /state`, `GET /health` | Snapshot for reconnect resync; health check |
 | `POST /transfers` | Typed request. Text is parsed for a sample ID, optional `from` / `to` |
-| `POST /voice/requests` | Ignores the audio and returns a scripted transcript, cycling through the 4 below |
+| `POST /voice/requests` | Ignores the audio and returns a scripted transcript, cycling through the 4 below. Only `user:jlee` holds a grant, as in the real seed |
 | `POST /transfers/{id}/confirm` | Releases the read-back. Returns `409` if the transfer was halted (e.g. grant revoked) |
 | `POST /approvals/{id}` | Only `user:mokafor` may decide (others get 403) |
 | `POST /grants/{id}/reissue` | Issues a NEW grant to replace a revoked one. Supervisor only (`by: user:mokafor`); refuses the agent; copies scope; fixed 60 min expiry; reason required; ledgered as `grant_reissued`. Spec: `dashboard/GRANT_REISSUE_SPEC.md` |
 | `POST /control/stop`, `POST /grants/{id}/revoke` | Halt, roll back reversible steps, recover the sample if it is out |
 | `POST /audit/query` | Canned answers: sample ID, `GRANT-0007`, "gaps", "without supervisor" |
+| `GET /audit/transfer/{id}`, `GET /audit/requests/{id}/verify` | Transfer trace (each row joined to its request) and audio hash re-check |
+| `POST /mock/seed-gap` | Test helper: an irreversible action that was sent but never scanned, so "Find custody gaps" has something to find |
 | `POST /mock/reset` | Clears all mock state (mock-only helper) |
 | `GET /voice/requests/{id}/audio` | Not implemented, so the audio player shows "unavailable" |
 

@@ -45,3 +45,20 @@ export function routeLength(points: Pt[]): number {
   for (let i = 0; i < points.length - 1; i++) total += dist(points[i], points[i + 1])
   return total
 }
+
+/** The point `fraction` (0-1) of the way along a route, measured by path length. */
+export function pointAt(points: Pt[], fraction: number): Pt {
+  if (points.length === 0) return { x: 0, y: 0 }
+  const total = routeLength(points)
+  if (total === 0) return points[0]
+  let remaining = Math.min(1, Math.max(0, fraction)) * total
+  for (let i = 0; i < points.length - 1; i++) {
+    const seg = dist(points[i], points[i + 1])
+    if (remaining <= seg) {
+      const k = seg === 0 ? 0 : remaining / seg
+      return { x: points[i].x + (points[i + 1].x - points[i].x) * k, y: points[i].y + (points[i + 1].y - points[i].y) * k }
+    }
+    remaining -= seg
+  }
+  return points[points.length - 1]
+}

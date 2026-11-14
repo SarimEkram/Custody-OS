@@ -1,7 +1,7 @@
 // The ONLY module that talks to the agent service. The browser never contacts
 // MongoDB or ElevenLabs. Base URL defaults to /api (Vite proxies it to :8000 and
 // strips the prefix, so /api/voice/requests → FastAPI POST /voice/requests).
-import type { AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
+import type { AudioVerification, AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? '/api'
 
@@ -104,6 +104,12 @@ export const auditQuery = (question: string, userId: string) =>
     ...r,
     entries: r.entries ?? [],
   }))
+
+/** Every ledger row for a transfer, each joined to the original request (`request`). */
+export const auditTransfer = (transferId: string) => request<unknown[]>(`/audit/transfer/${encodeURIComponent(transferId)}`)
+
+/** Re-hashes the stored audio and compares it with the hash recorded at intake. Done by the backend, not here. */
+export const verifyAudio = (requestId: string) => request<AudioVerification>(`/audit/requests/${encodeURIComponent(requestId)}/verify`)
 
 export const voiceAudioUrl = (requestId: string): string =>
   `${API_BASE}/voice/requests/${encodeURIComponent(requestId)}/audio`

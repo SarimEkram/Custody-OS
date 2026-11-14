@@ -3,7 +3,7 @@
 import type {
   Approval,
   ConfirmationRequest,
-  CourierPosition,
+  CourierSignal,
   LedgerEntry,
   ScanEvent,
   StreamEvent,
@@ -63,19 +63,26 @@ export function normalizeApproval(raw: unknown): Approval | null {
 export function normalizeConfirmation(raw: unknown): ConfirmationRequest | null {
   if (!isObj(raw)) return null
   const o = clean(raw)
-  if (!str(o.transfer_id) || !str(o.readback_text)) return null
-  return o as unknown as ConfirmationRequest
+  // The backend's ConfirmationService sends the sentence as `text`; older shapes used `readback_text`.
+  const sentence = str(o.readback_text) ? o.readback_text : str(o.text) ? o.text : null
+  if (!str(o.transfer_id) || !sentence) return null
+  return { ...o, readback_text: sentence } as unknown as ConfirmationRequest
 }
 
-export function normalizeCourier(raw: unknown): CourierPosition | null {
+export function normalizeCourier(raw: unknown): CourierSignal | null {
   if (!isObj(raw)) return null
   const o = raw
-  if (!str(o.transfer_id) || typeof o.x !== 'number' || typeof o.y !== 'number') return null
+  if (!str(o.transfer_id)) return null
+  const hasXY = typeof o.x === 'number' && typeof o.y === 'number'
+  const hasLeg = str(o.from) && str(o.to)
+  if (!hasXY && !hasLeg) return null // nothing to place the courier with
   return {
     transfer_id: o.transfer_id,
-    x: o.x,
-    y: o.y,
     progress: typeof o.progress === 'number' ? o.progress : 0,
+    ...(hasXY ? { x: o.x as number, y: o.y as number } : {}),
+    ...(hasLeg ? { from: o.from as string, to: o.to as string } : {}),
+    ...(str(o.job_id) ? { job_id: o.job_id } : {}),
+    ...(str(o.sample_id) ? { sample_id: o.sample_id } : {}),
   }
 }
 

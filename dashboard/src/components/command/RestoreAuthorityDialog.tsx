@@ -23,9 +23,11 @@ export function RestoreAuthorityDialog() {
   const setOpen = useCustodyStore((s) => s.setRestoreOpen)
   const identityId = useCustodyStore((s) => s.identityId)
   const setIdentity = useCustodyStore((s) => s.setIdentity)
+  const setNoGrant = useCustodyStore((s) => s.setNoGrant)
   const authority = useAuthority()
   const me = IDENTITIES.find((i) => i._id === identityId) ?? IDENTITIES[0]
   const isSupervisor = me.role === 'supervisor'
+  const holder = IDENTITIES.find((i) => i.role === 'lab_tech')
 
   const [reason, setReason] = useState('')
   const [ack, setAck] = useState(false)
@@ -62,6 +64,7 @@ export function RestoreAuthorityDialog() {
     setError(null)
     try {
       setResult(await reissueGrant(grantId, identityId, reason.trim()))
+      setNoGrant(null)
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'not_implemented') {
         setError('This backend can’t issue a new grant yet. For the demo, run scripts/reset_demo.sh and reload.')
@@ -84,8 +87,25 @@ export function RestoreAuthorityDialog() {
             <dt className="text-muted">Expires</dt><dd>{formatDateTime(result.expires_at)}</dd>
             <dt className="text-muted">Issued by</dt><dd>{me.name}</dd>
           </dl>
-          <p className="text-sm text-muted">Transfers that were halted stay stopped. Send a new request to continue.</p>
-          <button onClick={close} className="h-11 w-full rounded-xl bg-ok text-[15px] font-semibold text-bg hover:brightness-110">Done</button>
+          <p className="text-sm text-muted">
+            Transfers that were halted stay stopped. The agent only acts for the person who holds the grant, so new requests have to be sent as {holder?.name ?? 'that person'}.
+          </p>
+          <div className="flex gap-2">
+            {holder && holder._id !== identityId && (
+              <button
+                onClick={() => {
+                  setIdentity(holder._id)
+                  close()
+                }}
+                className="h-11 flex-1 rounded-xl bg-ok text-[15px] font-semibold text-bg hover:brightness-110"
+              >
+                Switch to {holder.name}
+              </button>
+            )}
+            <button onClick={close} className={`h-11 rounded-xl text-[15px] font-semibold ${holder && holder._id !== identityId ? 'px-4 text-muted ring-1 ring-line hover:text-fg' : 'w-full bg-ok text-bg hover:brightness-110'}`}>
+              {holder && holder._id !== identityId ? 'Stay as ' + me.name : 'Done'}
+            </button>
+          </div>
         </div>
       ) : (
         <form
