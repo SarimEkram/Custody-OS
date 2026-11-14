@@ -107,6 +107,16 @@ def _dashboard_view(r: dict) -> dict:
             "gaps": flat if route == "gaps" else []}
 
 
+async def _requests_for(entries: list[dict], already: list[dict]) -> list[dict]:
+    """The original voice/typed requests behind these ledger entries (the timeline starts from them)."""
+    have = {q.get("_id") for q in already}
+    ids = sorted({e["request_id"] for e in entries if e.get("request_id")} - have)
+    if not ids:
+        return already
+    found = await agent_db().voice_requests.find({"_id": {"$in": ids}}, {"words": 0}).to_list()
+    return already + jsonable(found)
+
+
 def _http(e: Exception) -> HTTPException:
     code = 403 if isinstance(e, PermissionError) else 404 if isinstance(e, LookupError) else 400
     return HTTPException(code, str(e))
@@ -198,7 +208,9 @@ async def stream():
 async def audit_query(body: AuditQuery):
     """Returns A's {route, params, routed_by, rows} plus the dashboard's {answer, mode, entries, scans, ...}."""
     r = await audit.ask(body.question)
-    return {**r, **_dashboard_view(r)}
+    view = _dashboard_view(r)
+    view["requests"] = await _requests_for(view["entries"], view["requests"])
+    return {**r, **view}
 
 
 @router.get("/audit/chain/{sample_id}")

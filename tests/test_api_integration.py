@@ -82,3 +82,10 @@ async def test_health_and_state(client):
     stamps = [row["timestamp"] for row in st["ledger"]]
     assert stamps == sorted(stamps)  # oldest first
     assert isinstance(st["demo_scripted"], bool) and st["demo_speed"] > 0
+
+
+async def test_audit_chain_includes_original_request(client):
+    r = (await client.post("/audit/query", json={"question": "What happened to TS-1042?"})).json()
+    assert [q["_id"] for q in r["requests"]] == ["VR-0001"]  # seeded history: the typed request
+    assert r["requests"][0]["transcript"].startswith("Move TS-1042")
+    assert "words" not in r["requests"][0]
