@@ -29,7 +29,7 @@ from bson import ObjectId
 from pydantic import BaseModel, ConfigDict
 
 from agent import ledger
-from agent.config import AGENT_ID, settings
+from agent.config import AGENT_ID
 from agent.db import agent_db
 from agent.embeddings import vector_stage
 from agent.models import RESTRICTION_RANK, Decision, EntryType, TransferState, utcnow

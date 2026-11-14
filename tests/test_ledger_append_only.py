@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".venv", "node_modules", ".git", "dist", "__pycache__"}
 # files allowed to mention the forbidden patterns: this test, setup/cleanup scripts run as admin
 ALLOWED_MUTATORS = {"tests/test_ledger_append_only.py", "db/check_cluster.py", "db/seed.py", "scripts/reset_demo.py",
-                    "tests/test_gate_integration.py"}  # admin-only setup/cleanup
+                    "tests/test_gate_integration.py", "tests/test_watchers_integration.py"}  # admin-only setup/cleanup
 
 MUTATION = r"(update_one|update_many|replace_one|delete_one|delete_many|find_one_and_update|" \
            r"find_one_and_replace|find_one_and_delete|bulk_write|drop|remove)"

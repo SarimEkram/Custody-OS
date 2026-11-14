@@ -8,7 +8,7 @@ Rule: **the demo path must work end to end as early as possible, then get richer
 |---|---|---|
 | **A: Data & policy** | Atlas cluster, DB users and custom roles, `$jsonSchema` validators (incl. `voice_requests`), GridFS `voice_audio` bucket, gate read-back rule (`pending_confirmation`), indexes (TTL + vector), the **policy gate**, change stream listeners (grants, approvals, control, custody_events), auditor Vector Search, aggregation pipelines | Gate denies/allows correctly with unit tests; validators and roles reject bad writes; watchers set halt/resume flags; canned aggregations return correct rows |
 | **B: Services & agent** | Mock FastAPI services (`freezer`, `scheduler`, `courier`, `station`), the **scanner**, the LLM agent loop (Groq free API, `LLM_MODEL`, manual tool-use loop), tool executor, verifier (sent → confirmed), recovery planner, **voice intake backend** (`POST /voice/requests`, ElevenLabs STT call with keyterms, GridFS + `voice_requests` write, `parse_request` with DB validation and low-confidence handling, read-back text) | A spoken request drives real HTTP calls through the gate; scans advance state; revoke triggers compensation + recovery |
-| **C: Dashboard & demo** | React + TypeScript dashboard (Vite) (map, live ledger, approvals, Stop, countdown, auditor panel), **push-to-talk mic UI** (MediaRecorder, live transcript display, typed fallback box, read-back confirm card, optional TTS playback, audio play button in the auditor), SSE client, **seed data**, demo script and reset script, backup recording, pitch/slides | Dashboard shows every beat in `docs/DEMO.md` live; reset runs in < 15 s; recording and slides ready |
+| **C: Dashboard & demo** | React + TypeScript dashboard (Vite) (map, live ledger, approvals, Stop, countdown, auditor panel), **push-to-talk mic UI** (MediaRecorder, live transcript display, typed fallback box, read-back confirm card, optional TTS playback, audio play button in the auditor), SSE client, **seed data**, demo script and reset script, backup recording, pitch/slides | Dashboard shows every beat in `DEMO.md` live; reset runs in < 15 s; recording and slides ready |
 
 Pairing points: A+B on `execute()` (gate ↔ executor), the verifier transaction and the read-back rule; B+C on the `/voice/requests` contract (multipart fields, response with transcript + parsed fields + low-confidence terms); B+C on the SSE event shape and courier position ticks; A+C on auditor query API and seed data matching the validators.
 
@@ -16,9 +16,9 @@ Pairing points: A+B on `execute()` (gate ↔ executor), the verifier transaction
 
 Agree on and commit these before splitting up. Put them in code, not just docs.
 
-1. **Document shapes**: Pydantic models in `agent/models.py` for every collection in `docs/DATA_MODEL.md`; TypeScript mirror in `dashboard/src/lib/types.ts`. Validators JSON in `db/validators/`.
-2. **Transfer states**: `requested`, `reserved`, `checked_out`, `in_transit`, `received`, plus `blocked`, `revoked`, `recovering` (and terminal `recovered`, `cancelled`). Transitions as in `docs/ARCHITECTURE.md`. One `Enum` in Python, one union type in TS.
-3. **Gate signature**: `check(...) -> GateDecision` and `execute(tool_call, ctx) -> ToolResult` exactly as in `docs/ARCHITECTURE.md`. B can stub it as "always allow" until A delivers.
+1. **Document shapes**: Pydantic models in `agent/models.py` for every collection in `DATA_MODEL.md`; TypeScript mirror in `dashboard/src/lib/types.ts`. Validators JSON in `db/validators/`.
+2. **Transfer states**: `requested`, `reserved`, `checked_out`, `in_transit`, `received`, plus `blocked`, `revoked`, `recovering` (and terminal `recovered`, `cancelled`). Transitions as in `ARCHITECTURE.md`. One `Enum` in Python, one union type in TS.
+3. **Gate signature**: `check(...) -> GateDecision` and `execute(tool_call, ctx) -> ToolResult` exactly as in `ARCHITECTURE.md`. B can stub it as "always allow" until A delivers.
 4. **Tool catalogue**: names, args, reversible flag, expected scan type.
 5. **Service ports and endpoints**: agent 8000, freezer 8101, scheduler 8102, courier 8103, station 8104, scanner 8105, dashboard 5173 (Vite dev server, proxies `/api` → 8000).
 6. **SSE event shape**: `{ "kind": "ledger" | "transfer" | "scan" | "approval" | "confirmation_request" | "courier_position", "data": {...} }`.
