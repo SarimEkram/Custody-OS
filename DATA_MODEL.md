@@ -24,7 +24,7 @@ Database: `custody`. All times are BSON Dates in UTC.
   "clearances": ["standard", "controlled"], "supervisor_id": "user:mokafor" }
 { "_id": "user:mokafor", "kind": "human", "name": "M. Okafor", "role": "supervisor",
   "clearances": ["standard", "controlled", "forensic"] }
-{ "_id": "agent:custody-01", "kind": "agent", "name": "Custody Agent", "model": "claude-opus-5-5" }
+{ "_id": "agent:custody-01", "kind": "agent", "name": "Custody Agent", "model": "openai/gpt-oss-120b" }
 { "_id": "scanner:reader-fzB", "kind": "scanner", "location_id": "FZ-B" }
 ```
 
@@ -313,7 +313,7 @@ Create via Atlas UI / Atlas CLI / `db.collection.create_search_index(SearchIndex
 ```
 `incidents_vector`, on `incidents`: same shape with filters on `tags` and `severity`.
 
-Embedding dimension lives in one constant (`EMBED_DIM = 1024`). Embed `summary` on insert (agent side, before inserting; ledger is insert-only so no back-fill updates). Use Voyage `input_type="document"` for stored text and `"query"` for searches.
+Embedding dimension lives in one constant (`EMBED_DIM = 1024`). Embed `summary` on insert (agent side, before inserting; ledger is insert-only so no back-fill updates). Use Voyage `input_type="document"` for stored text and `"query"` for searches. Voyage is an embedding model, not an LLM. Provider comes from `EMBEDDINGS_PROVIDER`: `atlas_auto` lets Atlas Automated Embedding generate vectors (the app then makes no Voyage call; verify with the check script), `voyage` uses a key from Atlas → AI Model APIs → Model API Keys. Person A owns this; `ledger.append()` is the single place that embeds.
 
 ## Database users and roles
 
@@ -358,7 +358,7 @@ From the Atlas "Free Cluster Limits" docs (https://www.mongodb.com/docs/atlas/re
 
 Transactions and TTL indexes aren't listed as restricted for Free clusters, but **verify them with the check script** rather than trusting this doc.
 
-### Sandbox check script (`db/check_sandbox.py`), run in the first hour
+### Cluster check script (`db/check_cluster.py`), run in the first hour
 
 Person A runs this right after creating the users. Each check prints PASS/FAIL and the script cleans up after itself (uses a `_check` prefix on collections).
 
@@ -369,7 +369,7 @@ Person A runs this right after creating the users. Each check prints PASS/FAIL a
 5. **Transaction:** start a session + transaction, write to two collections, commit; then a second transaction that aborts, and confirm nothing was written.
 6. **TTL:** create a TTL index on `_check_ttl.expires_at`, insert a doc expiring now, poll up to ~90 s for deletion (the TTL monitor runs about every 60 s). Run this in the background; don't block on it.
 7. **Vector Search:** create a `vectorSearch` index on `_check_vec` (`numDimensions: 1024`), wait for status `READY` via `list_search_indexes()`, insert 3 docs with random vectors, run `$vectorSearch`, expect 3 results. Then try creating a second vector index to confirm the cap allows two.
-8. Print a summary table and write it to `db/SANDBOX_CHECK.md` so the team (and Claude) knows what's actually available.
+8. Print a summary table and write it to `db/CLUSTER_CHECK.md` so the team (and Claude) knows what's actually available.
 
 If any check fails, tell the team immediately and update this doc's feature map. Fallbacks: no custom roles → app-level layer only; only one vector index → keep `ledger_vector`; change streams or transactions failing would be a surprise, so ask the organizers before redesigning.
 
@@ -489,7 +489,7 @@ Should return zero rows. Show that live: it's the proof the gate works.
 
 ## Auditor natural-language search
 
-1. Claude turns the question into `{semantic_query, filters}` (e.g. `filters: {decision: "deny"}`), using a fixed JSON schema (tool use with a single `audit_query` tool). Never let the model write raw pipelines.
+1. The LLM turns the question into `{semantic_query, filters}` (e.g. `filters: {decision: "deny"}`), using a fixed JSON schema (tool use with a single `audit_query` tool). Never let the model write raw pipelines.
 2. Embed `semantic_query` (Voyage, `input_type="query"`).
 3. Run:
 ```python
@@ -500,7 +500,7 @@ Should return zero rows. Show that live: it's the proof the gate works.
 ]
 ```
 4. For questions that map to a canned aggregation (gaps, restricted-without-supervisor, exposure), route to that aggregation instead; it's exact and more convincing.
-5. Claude writes a short answer citing ledger `_id`s; the UI links each to the timeline.
+5. The LLM writes a short answer citing ledger `_id`s; the UI links each to the timeline.
 
 ## Risk flagging in the gate (first thing to cut)
 

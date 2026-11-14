@@ -76,7 +76,7 @@ MongoDB features shown: GridFS (original audio), validation, custom roles, chang
 - **Pre-warm:** run one throwaway request before going on stage (warms Atlas connections, embedding client, model).
 - **Fallbacks:**
   - A **backup screen recording** of the full demo (record by late afternoon).
-  - `DEMO_SCRIPTED=1` mode: replays a recorded tool-call sequence through the real gate and services, no model call. Use if the API is slow or the network is bad.
+  - `DEMO_SCRIPTED=1` mode: replays a recorded tool-call sequence through the real gate and services, no model call. Use if the API is slow, the network is bad, or Groq's free-tier rate limit (429) is hit.
   - Hotspot/phone tether ready; Atlas IP access list includes `0.0.0.0/0` for the demo day only (or the venue IP).
 - **Timeouts:** verifier timeout ~10 s in demo mode; show `unconfirmed` gracefully, never a stack trace.
 - **Hide noise:** dashboard hides `embedding` fields and raw HTTP bodies by default (click to expand).

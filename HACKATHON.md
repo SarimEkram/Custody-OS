@@ -41,8 +41,8 @@ The other two tracks (for context only): **Memory You Can Govern** (scoped, expi
 ## Other tech
 
 - **ElevenLabs** speech-to-text (`scribe_v3`) for spoken requests; optional text-to-speech for spoken read-backs.
-- **Claude** (`claude-opus-5-5`) for planning and tool use.
-- **Voyage AI** embeddings for Vector Search.
+- **Groq** free API (OpenAI-compatible; default model `openai/gpt-oss-120b`) for planning and tool use.
+- **Voyage AI** embeddings for Vector Search, through Atlas (Automated Embedding or an AI Model APIs key).
 
 ## MongoDB features we must visibly use
 

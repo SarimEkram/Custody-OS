@@ -11,14 +11,14 @@
                 │ SSE (relayed change streams)  │ REST (voice audio, typed requests,
                 │                               │ confirmations, approvals, stop)
 ┌───────────────┴───────────────────────────────▼──────────────────────┐
-│ Agent service  (:8000)  Python · FastAPI · Anthropic SDK             │
+│ Agent service  (:8000)  Python · FastAPI · Groq LLM API              │
 │                                                                      │
 │  Voice intake: audio → ElevenLabs STT (scribe_v3) → transcript ─────────► api.elevenlabs.io
 │     → voice_requests doc + audio in GridFS → transfer request        │
 │        │                                                             │
 │        ▼                                                             │
-│  Agent loop (claude-opus-5-5, tool use)                              │
-│        │ every tool_use block                                        │
+│  Agent loop (Groq LLM, tool use)                                     │
+│        │ every tool call                                             │
 │        ▼                                                             │
 │  Policy Gate ──► ledger: decision entry (BEFORE the call)            │
 │        │ allowed only                                                │
@@ -45,7 +45,7 @@
 
 ### Agent service (`/agent`)
 - **Voice intake (`agent/voice.py`):** receives recorded audio from the dashboard, calls ElevenLabs speech-to-text, stores audio + transcript + speaker identity, and starts a transfer from the transcript. See "Voice intake" below.
-- **Agent loop:** manual Anthropic tool-use loop with `claude-opus-5-5`. System prompt describes the lab, the rules, and that tool results may be `DENIED`, `PENDING_APPROVAL` or `HALTED`. The model must give a `reason` argument on every tool call; it goes into the ledger.
+- **Agent loop:** manual tool-use loop against Groq's OpenAI-compatible chat API (`LLM_MODEL`, default `openai/gpt-oss-120b`). Tool calls arrive as `tool_calls` on the assistant message and results go back as `role: "tool"` messages. Free-tier limits (about 30 req/min, 8k tokens/min) mean a small tool list and trimmed history; on a 429, back off once, then fall back to `DEMO_SCRIPTED=1`. System prompt describes the lab, the rules, and that tool results may be `DENIED`, `PENDING_APPROVAL` or `HALTED`. The model must give a `reason` argument on every tool call; it goes into the ledger.
 - **Policy gate:** pure function plus DB reads. See contract below.
 - **Tool executor:** maps tool names to lab-service HTTP calls. Passes `correlation_id` in a header (`X-Correlation-Id`).
 - **Verifier:** after a physical action, waits (change stream on `custody_events`, filtered by `correlation_id`) up to a timeout for the scanner's confirmation. Returns `confirmed`, `mismatch` or `unconfirmed`.
@@ -93,7 +93,7 @@ When a physical thing happens (sample leaves freezer, courier picks up, courier 
 
 ### Scanner service (`/services/scanner`)
 - Receives raw scans from "readers" (the lab services and a manual `scripts/scan.py` for demos).
-- Validates the scan (known reader, known sample, plausible location) and writes `custody_events` using **its own DB user** (`scanner_writer`). The agent's DB user can only *read* `custody_events`.
+- Validates the scan (known reader, known sample, plausible location) and writes `custody_events` using **its own DB user** (`scanner_svc`). The agent's DB user can only *read* `custody_events`.
 - This is the independence story: the agent can claim anything in the ledger, but only scans count as proof, and the agent can't forge them.
 
 ### Dashboard (`/dashboard`)

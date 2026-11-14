@@ -13,9 +13,9 @@ flowchart LR
         AUD["Auditor search<br/>+ timeline"]
     end
 
-    subgraph B["Person B: the worker (Python, Claude, ElevenLabs)"]
+    subgraph B["Person B: the worker (Python, Groq, ElevenLabs)"]
         VOICE["Voice to text<br/>(ElevenLabs)"]
-        AGENT["AI agent<br/>(Claude)"]
+        AGENT["AI agent<br/>(Groq LLM)"]
         LAB["Fake lab:<br/>freezer, booking,<br/>courier, testing room"]
         SCAN["Pretend barcode<br/>scanner"]
     end
@@ -78,17 +78,17 @@ Builds what decides whether the AI is allowed to do something, and remembers eve
 6. **Set up instant alerts** (change streams). When someone hits Stop, takes a permission away, approves something, or the scanner confirms a handoff, MongoDB tells the AI right away.
 7. **Build the auditor search** (later in the day). Someone types a question in plain English, such as "show every time a restricted sample moved without a supervisor", and gets back the matching history. Atlas Automated Embedding may make this easier; try it during the check script.
 
-**Hands to others:** the `check()` function (to B), the database layout and the instant-alert feed (to C), the app logins (to everyone).
+**Hands to others:** the `check()` function and `ledger.append()` (to B; A writes `agent/ledger.py`), the database layout and the instant-alert feed (to C), the app logins (to everyone).
 
 ## Person B: the AI and the fake lab ("the worker")
 
-*Uses: Python, Claude, ElevenLabs.*
+*Uses: Python, Groq (free LLM API), ElevenLabs.*
 Builds the part that actually does the work.
 
 1. **Build the fake lab.** Four small pretend systems (freezer, room booking, courier, testing room), each a tiny web service with its own state.
 2. **Build the pretend barcode scanner.** Whenever something physical happens (sample leaves the freezer, courier picks it up, testing room receives it), the scanner records it with its own login. The AI's word doesn't count until the scanner agrees.
 3. **Turn voice into text.** Receive the recording from the website, send it to ElevenLabs (`scribe_v3`), and get the text back. Give ElevenLabs the list of sample IDs and room names so it spells them right. Save the recording and the text in the database.
-4. **Build the AI agent.** Claude reads the text, works out which sample and where, and checks those against the database. If something sounds wrong ("TS-1024?"), it asks instead of guessing. Then it plans the steps and does them one at a time. Before each step it calls Person A's `check()`. Until that's ready, use a placeholder that always says yes, so you're never waiting on A.
+4. **Build the AI agent.** The LLM (Groq) reads the text, works out which sample and where, and checks those against the database. If something sounds wrong ("TS-1024?"), it asks instead of guessing. Then it plans the steps and does them one at a time. Before each step it calls Person A's `check()`. Until that's ready, use a placeholder that always says yes, so you're never waiting on A. Write to the record book only by calling A's `ledger.append()`; don't touch the `ledger` collection yourself.
 5. **Read back before anything permanent.** Before the sample leaves the freezer, the AI sends a summary ("I'll move TS-1042 to Sequencing Station 3, arriving about 2:04. Confirm?") and waits.
 6. **Handle waiting and stopping.** If the checker says "ask a supervisor", pause until someone approves. If someone hits Stop or takes the permission away, cancel the bookings. If the sample is already out, send it back to the nearest freezer before its time runs out, and record how long it was out.
 7. **Make a safe demo mode** that replays the same steps every time, in case the AI acts up on stage.
