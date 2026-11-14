@@ -43,6 +43,9 @@ class MemoryCustodyStore:
     def create_transfer(self, doc: dict) -> None:
         self.transfers[doc["_id"]] = doc
 
+    def mark_compromised(self, sample_id: str) -> None:
+        self.samples[sample_id]["status"] = "compromised"
+
     def block(self, transfer_id: str, reason: str) -> None:
         """Pause for approval or read-back; remembers the verified state it paused in."""
         transfer = self.transfers[transfer_id]

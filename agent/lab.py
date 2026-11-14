@@ -88,6 +88,20 @@ class LabClient:
                     json={"sample_id": refs["sample_id"], "station_id": refs["to"],
                           "from_custodian": f"courier:{job}"},
                 )  # fmt: skip
+            case "return_to_storage":
+                freezer = args["freezer_id"]
+                if job and (await self._send(self.courier, "GET", f"/jobs/{job}", cid))[
+                    "status"
+                ] in ("in_transit", "arrived"):
+                    await self._send(
+                        self.courier, "POST", f"/jobs/{job}/reroute", cid,
+                        json={"destination": freezer},
+                    )  # fmt: skip
+                    await self._wait_for_arrival(job, cid)
+                return await self._send(
+                    self.freezer, "POST", "/checkin", cid,
+                    json={"sample_id": args["sample_id"], "freezer_id": freezer},
+                )  # fmt: skip
             case "cancel_reservation":
                 return await self._send(
                     self.scheduler, "DELETE", f"/reservations/{args['reservation_id']}", cid

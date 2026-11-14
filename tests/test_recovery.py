@@ -7,7 +7,7 @@ from agent.executor import RunContext, ToolResult
 from agent.gate_stub import GateDecision, StubGate
 from agent.recovery import RecoveryPlanner, choose_freezer
 from agent.transfers import MemoryCustodyStore
-from tests.test_loop import HAPPY, tc, world
+from tests.test_loop import HAPPY, world
 
 T0 = datetime(2026, 11, 14, 19, 0, tzinfo=UTC)
 CERTS = {"FZ-A": {"BSL-2"}, "FZ-B": {"BSL-2", "FORENSIC"}}
@@ -53,8 +53,12 @@ class Executor:
 
     async def execute(self, call, ctx):
         self.calls.append((call.name, call.args, ctx.on_behalf_of, ctx.outcome_type))
-        return ToolResult(tool_call_id=call.id, status="OK", correlation_id="c-r",
-                          verification=self.verification if call.name == "return_to_storage" else None)  # fmt: skip
+        return ToolResult(
+            tool_call_id=call.id,
+            status="OK",
+            correlation_id="c-r",
+            verification=self.verification if call.name == "return_to_storage" else None,
+        )
 
 
 class Bus:
@@ -63,36 +67,83 @@ class Bus:
 
 
 OUTCOMES = [
-    {"entry_type": "outcome", "tool": "reserve_station", "reversible": True,
-     "response": {"reservation_id": "RES-1"}},
-    {"entry_type": "outcome", "tool": "request_courier", "reversible": True,
-     "response": {"job_id": "CJ-1"}},
-    {"entry_type": "outcome", "tool": "notify", "reversible": True,
-     "args": {"user_id": "user:jlee"}, "response": {"sent": True}},
-]  # fmt: skip
+    {
+        "entry_type": "outcome",
+        "tool": "reserve_station",
+        "reversible": True,
+        "response": {"reservation_id": "RES-1"},
+    },
+    {
+        "entry_type": "outcome",
+        "tool": "request_courier",
+        "reversible": True,
+        "response": {"job_id": "CJ-1"},
+    },
+    {
+        "entry_type": "outcome",
+        "tool": "notify",
+        "reversible": True,
+        "args": {"user_id": "user:jlee"},
+        "response": {"sent": True},
+    },
+]
 
 
-def planner(*, sample_status="stored", job_status="assigned", progress=0.0, verification="confirmed",
-            scanned_after_min=2.0, max_out=10, outcomes=OUTCOMES):  # fmt: skip
+def planner(
+    *,
+    sample_status="stored",
+    job_status="assigned",
+    progress=0.0,
+    verification="confirmed",
+    scanned_after_min=2.0,
+    max_out=10,
+    outcomes=OUTCOMES,
+):
     store = MemoryCustodyStore(
-        {"TS-1042": {"status": sample_status, "checked_out_at": T0, "max_minutes_out": max_out,
-                     "required_certifications": []}},
+        {
+            "TS-1042": {
+                "status": sample_status,
+                "checked_out_at": T0,
+                "max_minutes_out": max_out,
+                "required_certifications": [],
+            }
+        },
         {"TR-1": {"_id": "TR-1", "state": "in_transit", "history": []}},
-    )  # fmt: skip
+    )
     ledger, ex = Ledger(), Executor(verification)
 
     async def read_outcomes(tid):
         return outcomes
 
     async def job_state(jid):
-        return {"status": job_status, "progress": progress, "origin": "FZ-B",
-                "destination": "SEQ-3", "eta_minutes": 4.0}  # fmt: skip
+        return {
+            "status": job_status,
+            "progress": progress,
+            "origin": "FZ-B",
+            "destination": "SEQ-3",
+            "eta_minutes": 4.0,
+        }
 
     bus = Bus(T0 + timedelta(seconds=scanned_after_min))
-    p = RecoveryPlanner(ex, store, ledger.append, read_outcomes, job_state, CERTS, bus,
-                        demo_speed=60.0, clock=lambda: T0 + timedelta(seconds=progress * 4))  # fmt: skip
-    ctx = RunContext("agent:custody-01", "user:jlee", "GRANT-0007", "TR-1", "VR-1",
-                     refs={"sample_id": "TS-1042", "courier_job_id": "CJ-1"})  # fmt: skip
+    p = RecoveryPlanner(
+        ex,
+        store,
+        ledger.append,
+        read_outcomes,
+        job_state,
+        CERTS,
+        bus,
+        demo_speed=60.0,
+        clock=lambda: T0 + timedelta(seconds=progress * 4),
+    )
+    ctx = RunContext(
+        "agent:custody-01",
+        "user:jlee",
+        "GRANT-0007",
+        "TR-1",
+        "VR-1",
+        refs={"sample_id": "TS-1042", "courier_job_id": "CJ-1"},
+    )
     return p, ex, store, ledger, ctx
 
 
@@ -111,9 +162,21 @@ def test_sample_never_left_the_freezer_so_reversible_actions_are_rolled_back_new
 
 def test_a_courier_that_already_has_the_sample_is_rerouted_not_cancelled():
     p, ex, *_ = planner(sample_status="out", job_status="in_transit", progress=0.5)
-    run(p.run(*[RunContext("agent:custody-01", "user:jlee", "G", "TR-1", "VR-1",
-                           refs={"sample_id": "TS-1042", "courier_job_id": "CJ-1"})],
-              revoker="user:mokafor"))  # fmt: skip
+    run(
+        p.run(
+            *[
+                RunContext(
+                    "agent:custody-01",
+                    "user:jlee",
+                    "G",
+                    "TR-1",
+                    "VR-1",
+                    refs={"sample_id": "TS-1042", "courier_job_id": "CJ-1"},
+                )
+            ],
+            revoker="user:mokafor",
+        )
+    )
     names = [c[0] for c in ex.calls]
     assert "cancel_courier_job" not in names and names[-1] == "return_to_storage"
 
@@ -139,8 +202,9 @@ def test_sample_out_goes_back_to_the_nearest_certified_freezer_and_exposure_is_l
 
 
 def test_clock_run_out_is_a_violation_and_the_sample_is_flagged_compromised():
-    p, ex, store, ledger, ctx = planner(sample_status="out", job_status="in_transit", progress=0.5,
-                                        scanned_after_min=4.0, max_out=3)  # fmt: skip
+    p, ex, store, ledger, ctx = planner(
+        sample_status="out", job_status="in_transit", progress=0.5, scanned_after_min=4.0, max_out=3
+    )
     result = run(p.run(ctx, revoker="user:mokafor"))
     assert result.status == "recovered_late" and result.exceeded
     assert store.samples["TS-1042"]["status"] == "compromised"
@@ -149,8 +213,9 @@ def test_clock_run_out_is_a_violation_and_the_sample_is_flagged_compromised():
 
 
 def test_an_unconfirmed_return_is_a_violation_not_a_silent_success():
-    p, ex, store, ledger, ctx = planner(sample_status="out", job_status="in_transit",
-                                        progress=0.5, verification="unconfirmed")  # fmt: skip
+    p, ex, store, ledger, ctx = planner(
+        sample_status="out", job_status="in_transit", progress=0.5, verification="unconfirmed"
+    )
     result = run(p.run(ctx, revoker="user:mokafor"))
     assert result.status == "unconfirmed"
     assert [e["entry_type"] for e in ledger.entries] == ["violation"]
@@ -167,8 +232,13 @@ class HaltOn:
 
     async def check(self, **kw):
         if kw["tool"] == self.tool:
-            lid = await self.inner.append({"entry_type": "decision", "decision": "halt", **{
-                k: kw[k] for k in ("transfer_id", "correlation_id")}})  # fmt: skip
+            lid = await self.inner.append(
+                {
+                    "entry_type": "decision",
+                    "decision": "halt",
+                    **{k: kw[k] for k in ("transfer_id", "correlation_id")},
+                }
+            )
             return GateDecision(decision="halt", policy_id="p", policy_version=1, ledger_id=lid)
         return await self.inner.check(**kw)
 
@@ -188,8 +258,16 @@ def test_revoked_in_the_corridor_is_compensated_returned_confirmed_and_audited()
     async def job_state(jid):
         return (await parts["lab"].courier.get(f"/jobs/{jid}")).json()
 
-    planner = RecoveryPlanner(loop.executor, store, ledger.append, read_outcomes, job_state,
-                              {"FZ-B": {"BSL-2"}}, parts["bus"], demo_speed=60.0)  # fmt: skip
+    planner = RecoveryPlanner(
+        loop.executor,
+        store,
+        ledger.append,
+        read_outcomes,
+        job_state,
+        {"FZ-B": {"BSL-2"}},
+        parts["bus"],
+        demo_speed=60.0,
+    )
     outcome = asyncio.run(planner.run(ctx, revoker="user:jlee"))
 
     assert outcome.status == "recovered" and outcome.freezer_id == "FZ-B"

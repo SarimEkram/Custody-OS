@@ -45,6 +45,7 @@ class RunContext:
     grant_id: str
     transfer_id: str
     request_id: str | None = None
+    outcome_type: str = "outcome"  # recovery runs write "compensation" / "recovery"
     refs: dict = field(default_factory=dict)  # working memory: sample_id, from, to, lab ids
 
     def __post_init__(self) -> None:
@@ -104,7 +105,7 @@ class Executor:
             error = str(e)
 
         outcome_id = await self.append({
-            "timestamp": datetime.now(UTC), "entry_type": "outcome", "actor": ctx.actor,
+            "timestamp": datetime.now(UTC), "entry_type": ctx.outcome_type, "actor": ctx.actor,
             "on_behalf_of": ctx.on_behalf_of, "grant_id": ctx.grant_id,
             "policy_id": decision.policy_id, "policy_version": decision.policy_version,
             "decision": "allow", "transfer_id": ctx.transfer_id,
