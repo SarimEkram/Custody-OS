@@ -5,14 +5,14 @@ signs the event, and stores it. The store is injected: MemoryStore for now, a
 Mongo-backed one (scanner_svc user) once the Atlas URIs exist.
 """
 
-import hashlib
-import hmac
 import inspect
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+from agent.signing import sign_scan  # one signing formula, shared with the verifier
 
 
 class RawScan(BaseModel):
@@ -39,20 +39,6 @@ class MemoryStore:
         return len(self.events)
 
 
-def sign(secret: str, event: dict) -> str:
-    msg = "|".join(
-        [
-            event["scanner_id"],
-            event["type"],
-            event["sample_id"],
-            event["location_id"],
-            event["correlation_id"],
-            event["scanned_at"].isoformat(),
-        ]
-    )
-    return "hmac-sha256:" + hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
-
-
 def create_app(store: Store, readers: dict[str, str], samples: set[str], secret: str) -> FastAPI:
     """readers maps reader_id -> the location it is installed at."""
     app = FastAPI(title="scanner")
@@ -68,7 +54,7 @@ def create_app(store: Store, readers: dict[str, str], samples: set[str], secret:
         event = raw.model_dump(exclude={"reader_id"}, exclude_none=True)
         event["scanner_id"] = raw.reader_id
         event["scanned_at"] = datetime.now(UTC)
-        event["signature"] = sign(secret, event)
+        event["signature"] = sign_scan(event, secret)
         written = store.insert(event)
         if inspect.isawaitable(written):  # the Mongo store is async, the memory one is not
             await written
