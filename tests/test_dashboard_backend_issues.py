@@ -1,6 +1,8 @@
 """The three open issues in DASHBOARD_BACKEND_ISSUES.md. No network, no database.
 
-1. grant reissue (supervisor only, new grant, audited)  2. original-audio route  3. courier reroute fields
+1. grant reissue (supervisor only, new grant, audited)
+2. original-audio route
+3. courier reroute fields
 """
 
 import asyncio
@@ -19,11 +21,22 @@ from agent.voice import sniff_audio_type
 from services.courier.app import create_app as courier_app
 
 NOW = datetime(2026, 11, 14, 19, 0, tzinfo=UTC)
-OLD = {"_id": "GRANT-0007", "grantor": "user:jlee", "grantee": "agent:custody-01", "status": "revoked",
-       "scope": {"actions": ["lookup_sample", "checkout_sample"], "sample_types": ["tissue"],
-                 "locations": ["FZ-A", "SEQ-3"], "max_restriction": "forensic"},
-       "created_at": NOW - timedelta(hours=2), "expires_at": NOW + timedelta(hours=4),
-       "revoked_at": NOW - timedelta(minutes=5), "revoked_by": "user:jlee"}
+OLD = {
+    "_id": "GRANT-0007",
+    "grantor": "user:jlee",
+    "grantee": "agent:custody-01",
+    "status": "revoked",
+    "scope": {
+        "actions": ["lookup_sample", "checkout_sample"],
+        "sample_types": ["tissue"],
+        "locations": ["FZ-A", "SEQ-3"],
+        "max_restriction": "forensic",
+    },
+    "created_at": NOW - timedelta(hours=2),
+    "expires_at": NOW + timedelta(hours=4),
+    "revoked_at": NOW - timedelta(minutes=5),
+    "revoked_by": "user:jlee",
+}
 SUPERVISOR = {"_id": "user:mokafor", "kind": "human", "role": "supervisor"}
 TECH = {"_id": "user:jlee", "kind": "human", "role": "lab_tech"}
 POLICY = {"policy_id": "custody-default", "version": 3}
@@ -72,7 +85,7 @@ def test_a_reason_of_at_least_eight_characters_is_required(reason):
 
 
 def test_an_unknown_grant_is_not_found():
-    with pytest.raises(LookupError, match="GRANT-0007"):
+    with pytest.raises(LookupError, match="unknown grant"):
         plan(old=None)
 
 
@@ -124,8 +137,11 @@ def reissue_client(monkeypatch):
             raise outcome
         return outcome
 
-    fake.outcome = {"grant_id": "GRANT-0008", "supersedes": "GRANT-0007",
-                    "expires_at": NOW + timedelta(minutes=60)}
+    fake.outcome = {
+        "grant_id": "GRANT-0008",
+        "supersedes": "GRANT-0007",
+        "expires_at": NOW + timedelta(minutes=60),
+    }
     monkeypatch.setattr(api, "reissue_grant", fake)
     app = FastAPI()
     app.include_router(api.router)
@@ -138,24 +154,33 @@ def test_the_route_returns_the_dashboards_success_shape(reissue_client):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True and body["grant_id"] == "GRANT-0008"
-    assert body["supersedes"] == "GRANT-0007" and body["expires_at"].startswith("2026-11-14T20:00:00")
+    assert body["supersedes"] == "GRANT-0007" and body["expires_at"].startswith(
+        "2026-11-14T20:00:00"
+    )
     assert calls == [("GRANT-0007", "user:mokafor", GOOD)]
 
 
 def test_scope_and_expiry_in_the_body_are_ignored(reissue_client):
     client, _, calls = reissue_client
-    body = {"by": "user:mokafor", "reason": GOOD, "scope": {"actions": ["everything"]},
-            "expires_at": "2099-01-01T00:00:00Z"}
+    body = {
+        "by": "user:mokafor",
+        "reason": GOOD,
+        "scope": {"actions": ["everything"]},
+        "expires_at": "2099-01-01T00:00:00Z",
+    }
     assert client.post("/grants/GRANT-0007/reissue", json=body).status_code == 200
     assert calls == [("GRANT-0007", "user:mokafor", GOOD)]  # nothing else reaches the service
 
 
-@pytest.mark.parametrize("error, status", [
-    (PermissionError("Only a supervisor can issue a new grant."), 403),
-    (LookupError("unknown grant GRANT-9"), 404),
-    (control.Conflict("GRANT-0007 is still active, so there is nothing to replace."), 409),
-    (ValueError("A reason of at least 8 characters is required."), 422),
-])
+@pytest.mark.parametrize(
+    "error, status",
+    [
+        (PermissionError("Only a supervisor can issue a new grant."), 403),
+        (LookupError("unknown grant GRANT-9"), 404),
+        (control.Conflict("GRANT-0007 is still active, so there is nothing to replace."), 409),
+        (ValueError("A reason of at least 8 characters is required."), 422),
+    ],
+)
 def test_errors_map_to_the_status_codes_with_readable_detail(reissue_client, error, status):
     client, fake, _ = reissue_client
     fake.outcome = error
@@ -193,8 +218,10 @@ class Audio:
 
 
 def audio_client():
-    docs = {"VR-1": {"_id": "VR-1", "source": "voice", "audio_file_id": "F1"},
-            "VR-2": {"_id": "VR-2", "source": "typed", "audio_file_id": None}}
+    docs = {
+        "VR-1": {"_id": "VR-1", "source": "voice", "audio_file_id": "F1"},
+        "VR-2": {"_id": "VR-2", "source": "typed", "audio_file_id": None},
+    }
     return TestClient(create_app(requests=Requests(docs), audio=Audio({"F1": WEBM})))
 
 
@@ -225,10 +252,17 @@ def test_a_typed_or_unknown_request_is_a_404_with_a_readable_detail():
     assert unknown.status_code == 404 and "VR-9" in unknown.json()["detail"]
 
 
-@pytest.mark.parametrize("head, kind", [
-    (b"\x1aE\xdf\xa3....", "audio/webm"), (b"OggS....", "audio/ogg"), (b"RIFF....WAVE", "audio/wav"),
-    (b"....ftypM4A ", "audio/mp4"), (b"ID3\x04....", "audio/mpeg"), (b"??????", "application/octet-stream"),
-])
+@pytest.mark.parametrize(
+    "head, kind",
+    [
+        (b"\x1aE\xdf\xa3....", "audio/webm"),
+        (b"OggS....", "audio/ogg"),
+        (b"RIFF....WAVE", "audio/wav"),
+        (b"....ftypM4A ", "audio/mp4"),
+        (b"ID3\x04....", "audio/mpeg"),
+        (b"??????", "application/octet-stream"),
+    ],
+)
 def test_the_audio_type_is_recognised_from_the_recording_itself(head, kind):
     assert sniff_audio_type(head) == kind
 
@@ -252,12 +286,16 @@ class Clock:
 @pytest.fixture
 def courier():
     clock = Clock()
-    return TestClient(courier_app(TRAVEL, READERS, lambda s: None, clock=clock, demo_speed=60)), clock
+    return TestClient(
+        courier_app(TRAVEL, READERS, lambda s: None, clock=clock, demo_speed=60)
+    ), clock
 
 
 def started(client):
-    jid = client.post("/jobs", json={"sample_id": "TS-1", "origin": "FZ-B", "destination": "SEQ-3",
-                                     "transfer_id": "TR-1"}).json()["job_id"]
+    jid = client.post(
+        "/jobs",
+        json={"sample_id": "TS-1", "origin": "FZ-B", "destination": "SEQ-3", "transfer_id": "TR-1"},
+    ).json()["job_id"]
     client.post(f"/jobs/{jid}/pickup", headers={"X-Correlation-Id": "c-1"})
     return jid
 
@@ -283,10 +321,23 @@ def test_a_reroute_back_to_origin_remembers_the_original_route_and_how_far_it_go
 
 
 def test_the_ticker_adds_the_fields_only_for_rerouted_jobs():
-    plain = {"job_id": "CJ-1", "transfer_id": "TR-1", "sample_id": "TS-1", "origin": "FZ-B",
-             "destination": "SEQ-3", "status": "in_transit", "progress": 0.5}
-    rerouted = {**plain, "job_id": "CJ-2", "destination": "FZ-B", "progress": 0.35,
-                "original_to": "SEQ-3", "return_from_progress": 0.42}
+    plain = {
+        "job_id": "CJ-1",
+        "transfer_id": "TR-1",
+        "sample_id": "TS-1",
+        "origin": "FZ-B",
+        "destination": "SEQ-3",
+        "status": "in_transit",
+        "progress": 0.5,
+    }
+    rerouted = {
+        **plain,
+        "job_id": "CJ-2",
+        "destination": "FZ-B",
+        "progress": 0.35,
+        "original_to": "SEQ-3",
+        "return_from_progress": 0.42,
+    }
 
     async def go():
         hub = EventHub()

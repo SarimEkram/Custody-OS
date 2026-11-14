@@ -115,6 +115,9 @@ class Grant(_Doc):
     revoked_at: datetime | None = None
     revoked_by: str | None = None
     revoke_reason: str | None = None
+    supersedes: str | None = None  # set on a replacement grant: the revoked grant it replaces
+    issued_by: str | None = None  # the supervisor who issued the replacement
+    superseded_by: str | None = None  # set on the revoked grant once it has been replaced
 
 
 class Policy(_Doc):

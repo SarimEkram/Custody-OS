@@ -7,7 +7,10 @@
       "grantee":    { "bsonType": "string", "pattern": "^agent:" },
       "status":     { "enum": ["active", "revoked"] },
       "scope":      { "bsonType": "object", "required": ["actions"] },
-      "expires_at": { "bsonType": "date" }
+      "expires_at": { "bsonType": "date" },
+      "supersedes":    { "bsonType": ["string", "null"] },
+      "issued_by":     { "bsonType": ["string", "null"], "pattern": "^user:" },
+      "superseded_by": { "bsonType": ["string", "null"] }
     }
   }
 }
