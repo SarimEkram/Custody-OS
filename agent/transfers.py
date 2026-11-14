@@ -75,6 +75,9 @@ class MemoryCustodyStore:
     async def confirm_readback(self, transfer_id: str) -> None:
         self.transfers[transfer_id]["readback_confirmed"] = True
 
+    async def set_fields(self, transfer_id: str, **fields) -> None:
+        self.transfers[transfer_id].update(fields)
+
     async def mark_compromised(self, sample_id: str) -> None:
         self.samples[sample_id]["status"] = "compromised"
 

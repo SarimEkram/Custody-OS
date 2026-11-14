@@ -75,6 +75,11 @@ class MongoCustodyStore:
         back = (await self.get_transfer(transfer_id))["blocked_from"]
         await self._move(transfer_id, back, {"blocked_reason": None})
 
+    async def set_fields(self, transfer_id: str, **fields) -> None:
+        await self.db.transfers.update_one(
+            {"_id": transfer_id}, {"$set": {**fields, "updated_at": _now()}}
+        )
+
     async def confirm_readback(self, transfer_id: str) -> None:
         await self.db.transfers.update_one(
             {"_id": transfer_id}, {"$set": {"readback_confirmed": True, "updated_at": _now()}}

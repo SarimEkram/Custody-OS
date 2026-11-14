@@ -64,8 +64,13 @@ class AgentLoop:
         self.manage_blocking = manage_blocking
 
     async def _sync_state(self, ctx: RunContext) -> None:
-        """requested -> reserved once the station is held and the courier is booked."""
+        """Record the lab's ids on the transfer (the gate's checkout preconditions read them), and
+        move requested -> reserved once the station is held and the courier is booked."""
         transfer = await self.store.get_transfer(ctx.transfer_id)
+        new = {k: ctx.refs[k] for k in ("reservation_id", "courier_job_id")
+               if k in ctx.refs and transfer.get(k) != ctx.refs[k]}  # fmt: skip
+        if new:
+            await self.store.set_fields(ctx.transfer_id, **new)
         booked = {"reservation_id", "courier_job_id"} <= ctx.refs.keys()
         if transfer["state"] == "requested" and booked:
             await self.store.set_state(ctx.transfer_id, "reserved")
