@@ -49,3 +49,16 @@ def test_reversible_tools_name_their_compensation(name):
 @pytest.mark.parametrize("name", ["checkout_sample", "handoff_to_courier", "deliver"])
 def test_irreversible_tools_describe_a_recovery_step(name):
     assert TOOLS[name].recovery
+
+
+def test_llm_catalogue_agrees_with_the_gates_tool_authority():
+    """agent/tools.py (A) is what the gate trusts; the LLM-facing schemas must not drift from it."""
+    from agent.tools import TOOLS as GATE
+
+    assert set(TOOLS) == set(GATE)
+    for name, mine in TOOLS.items():
+        theirs = GATE[name]
+        assert mine.expected_scan == theirs.expected_scan, name
+        assert mine.system == theirs.system, name
+        if theirs.reversibility != "recovery":  # the gate tags recovery actions reversible
+            assert mine.reversible == theirs.reversible, name

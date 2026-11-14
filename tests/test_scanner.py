@@ -25,6 +25,11 @@ def scan(**over):
     return {**body, **over}
 
 
+def ctx_pair():
+    store = MemoryStore()
+    return TestClient(create_app(store, READERS, SAMPLES, SECRET)), store
+
+
 @pytest.fixture
 def ctx():
     store = MemoryStore()
@@ -51,22 +56,16 @@ def test_scanner_stamps_the_time_not_the_caller(ctx):
     assert event["scanned_at"] >= before
 
 
-def test_signature_is_verifiable_hmac_over_the_event(ctx):
-    client, store = ctx
+def test_signature_verifies_with_the_shared_signer_the_agent_uses():
+    from agent.signing import verify_scan
+
+    client, store = ctx_pair()
     client.post("/scan", json=scan())
     [event] = store.events
-    msg = "|".join(
-        [
-            event["scanner_id"],
-            event["type"],
-            event["sample_id"],
-            event["location_id"],
-            event["correlation_id"],
-            event["scanned_at"].isoformat(),
-        ]
-    )
-    expected = "hmac-sha256:" + hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    assert event["signature"] == expected
+    assert event["signature"].startswith("hmac-sha256:")
+    assert verify_scan(event, SECRET)  # A's verifier accepts what the scanner wrote
+    assert not verify_scan({**event, "sample_id": "TS-9999"}, SECRET)  # tampering is caught
+    assert not verify_scan(event, "some-other-secret")
 
 
 @pytest.mark.parametrize(
