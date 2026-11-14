@@ -189,3 +189,18 @@ class VoiceIntake:
                  "language_probability": heard.get("language_probability"),
                  "keyterms": keyterms, "transcription_id": heard.get("transcription_id")},
         )  # fmt: skip
+
+
+def sniff_audio_type(head: bytes) -> str:
+    """The recording's media type, from its first bytes (the clip is stored without one)."""
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return "audio/webm"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return "audio/wav"
+    if head[4:8] == b"ftyp":
+        return "audio/mp4"
+    if head.startswith(b"ID3") or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    return "application/octet-stream"

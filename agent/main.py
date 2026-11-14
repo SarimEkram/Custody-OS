@@ -130,7 +130,7 @@ def build_service(b: Backends) -> Service:
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
     speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
-    app = create_b_routes(intake, voice, confirmations, speech)
+    app = create_b_routes(intake, voice, confirmations, speech, requests=b.requests, audio=b.audio)
 
     def stream_events() -> AsyncIterator[dict]:
         return merged_stream(b.event_feed(), hub)

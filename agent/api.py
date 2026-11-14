@@ -7,6 +7,7 @@ Routes (dashboard calls them through the Vite proxy as /api/...):
     POST /transfers/{id}/confirm      read-back confirmed by the tech
     POST /approvals/{id}              supervisor approve/deny
     POST /grants/{id}/revoke          revoke a grant (uses admin_svc)
+    POST /grants/{id}/reissue         supervisor issues a NEW grant to replace a revoked one
     POST /control/stop                Stop switch (all, or one transfer)
     GET  /state                       snapshot for the dashboard (re-sync after an SSE drop)
     GET  /health                      liveness + MongoDB ping
@@ -29,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from agent import audit
-from agent.control import press_stop, revoke_grant
+from agent.control import Conflict, press_stop, reissue_grant, revoke_grant
 from agent.db import agent_db
 from agent.policy_gate import confirm_readback, decide_approval
 from agent.watchers import event_feed, jsonable
@@ -39,6 +40,7 @@ router = APIRouter()
 
 class ConfirmBody(BaseModel):
     """C sends {user_id, method}; readback_text is optional."""
+
     user_id: str
     readback_text: str | None = None
     method: Literal["button", "voice"] = "button"
@@ -46,6 +48,7 @@ class ConfirmBody(BaseModel):
 
 class ApprovalBody(BaseModel):
     """Accepts {decided_by, approve} (original) or C's {user_id, decision: approved|denied}."""
+
     model_config = ConfigDict(populate_by_name=True)
     decided_by: str = Field(validation_alias=AliasChoices("decided_by", "user_id"))
     approve: bool | None = None
@@ -63,6 +66,7 @@ class ApprovalBody(BaseModel):
 
 class RevokeBody(BaseModel):
     """Accepts {by, reason} or C's {user_id}."""
+
     model_config = ConfigDict(populate_by_name=True)
     by: str = Field(validation_alias=AliasChoices("by", "user_id"))
     reason: str = ""
@@ -70,6 +74,7 @@ class RevokeBody(BaseModel):
 
 class StopBody(BaseModel):
     """Accepts {by, transfer_id} or C's {user_id, scope, transfer_id}; scope is derived from transfer_id."""
+
     model_config = ConfigDict(populate_by_name=True)
     by: str = Field(validation_alias=AliasChoices("by", "user_id"))
     transfer_id: str | None = None
@@ -102,9 +107,14 @@ def _dashboard_view(r: dict) -> dict:
         if q.get("_id") not in seen:
             seen.add(q.get("_id"))
             uniq.append(q)
-    return {"answer": answer, "mode": "semantic" if route == "semantic" else "canned", "entries": entries,
-            "scans": [x for x in flat if is_scan(x)], "requests": uniq,
-            "gaps": flat if route == "gaps" else []}
+    return {
+        "answer": answer,
+        "mode": "semantic" if route == "semantic" else "canned",
+        "entries": entries,
+        "scans": [x for x in flat if is_scan(x)],
+        "requests": uniq,
+        "gaps": flat if route == "gaps" else [],
+    }
 
 
 async def _requests_for(entries: list[dict], already: list[dict]) -> list[dict]:
@@ -135,7 +145,9 @@ async def confirm(transfer_id: str, body: ConfirmBody):
 @router.post("/approvals/{approval_id}")
 async def approval(approval_id: str, body: ApprovalBody):
     try:
-        return jsonable(await decide_approval(approval_id, body.decided_by, bool(body.approve), body.note))
+        return jsonable(
+            await decide_approval(approval_id, body.decided_by, bool(body.approve), body.note)
+        )
     except (ValueError, PermissionError) as e:
         raise _http(e) from e
 
@@ -146,6 +158,29 @@ async def revoke(grant_id: str, body: RevokeBody):
         return jsonable(await revoke_grant(grant_id, body.by, body.reason))
     except (ValueError, PermissionError, LookupError) as e:
         raise _http(e) from e
+
+
+class ReissueBody(BaseModel):
+    """Only who and why. Any scope or expiry the client sends is ignored: the server decides."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    by: str = Field(validation_alias=AliasChoices("by", "user_id"))
+    reason: str = ""
+
+
+@router.post("/grants/{grant_id}/reissue")
+async def reissue(grant_id: str, body: ReissueBody):
+    try:
+        done = await reissue_grant(grant_id, body.by, body.reason)
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return jsonable({"ok": True, **done})
 
 
 @router.post("/control/stop")
@@ -200,8 +235,12 @@ async def stream():
         yield ": connected\n\n"
         async for ev in event_feed():
             yield f"data: {json.dumps(ev)}\n\n"
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/audit/query")

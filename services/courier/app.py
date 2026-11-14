@@ -112,9 +112,14 @@ def create_app(
         job = get_or_404(jid)
         if job["status"] not in ("picked_up", "rerouted"):
             raise HTTPException(409, f"{jid} has not been picked up")
-        so_far = view(job)["progress"] * job["eta_minutes"]
+        progress = view(job)["progress"]
+        so_far = progress * job["eta_minutes"]
         if body.destination == job["origin"]:
             eta = max(so_far, 0.1)
+            # destination becomes the origin, so remember the real route: a dashboard that
+            # reloads mid-recovery can place the dot without having watched the outbound leg
+            job.setdefault("original_to", job["destination"])
+            job.setdefault("return_from_progress", progress)
         else:
             eta = minutes(job["destination"], body.destination)
         job.update(
