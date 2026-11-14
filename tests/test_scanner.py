@@ -1,0 +1,75 @@
+import hashlib
+import hmac
+from datetime import datetime, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+from services.scanner.app import MemoryStore, create_app
+
+SECRET = "test-secret"
+READERS = {"scanner:reader-fzB": "FZ-B"}
+SAMPLES = {"TS-1042"}
+
+
+def scan(**over):
+    body = {
+        "reader_id": "scanner:reader-fzB",
+        "type": "checkout",
+        "sample_id": "TS-1042",
+        "location_id": "FZ-B",
+        "from_custodian": "location:FZ-B",
+        "to_custodian": "courier:CJ-208",
+        "correlation_id": "c-7f3a",
+    }
+    return {**body, **over}
+
+
+@pytest.fixture
+def ctx():
+    store = MemoryStore()
+    client = TestClient(create_app(store, READERS, SAMPLES, SECRET))
+    return client, store
+
+
+def test_valid_scan_is_written_with_scanner_id_and_correlation_id(ctx):
+    client, store = ctx
+    r = client.post("/scan", json=scan())
+    assert r.status_code == 201
+    [event] = store.events
+    assert event["scanner_id"] == "scanner:reader-fzB"
+    assert event["correlation_id"] == "c-7f3a"
+    assert event["sample_id"] == "TS-1042"
+
+
+def test_scanner_stamps_the_time_not_the_caller(ctx):
+    client, store = ctx
+    before = datetime.now(timezone.utc)
+    client.post("/scan", json=scan(scanned_at="2001-01-01T00:00:00Z"))
+    [event] = store.events
+    assert isinstance(event["scanned_at"], datetime)
+    assert event["scanned_at"] >= before
+
+
+def test_signature_is_verifiable_hmac_over_the_event(ctx):
+    client, store = ctx
+    client.post("/scan", json=scan())
+    [event] = store.events
+    msg = "|".join([event["scanner_id"], event["type"], event["sample_id"],
+                    event["location_id"], event["correlation_id"],
+                    event["scanned_at"].isoformat()])
+    expected = "hmac-sha256:" + hmac.new(SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    assert event["signature"] == expected
+
+
+@pytest.mark.parametrize("bad", [
+    {"reader_id": "scanner:rogue"},                 # unknown reader
+    {"sample_id": "TS-9999"},                       # unknown sample
+    {"location_id": "SEQ-3"},                       # reader is not at that location
+    {"type": "teleport"},                           # not a scan type
+])
+def test_invalid_scans_are_rejected_and_nothing_is_written(ctx, bad):
+    client, store = ctx
+    r = client.post("/scan", json=scan(**bad))
+    assert r.status_code in (400, 404, 422)
+    assert store.events == []
