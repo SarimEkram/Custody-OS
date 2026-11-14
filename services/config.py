@@ -74,7 +74,7 @@ def build_lab_config(
         cfg.courier_readers.setdefault(where, ident["_id"])
         if kinds[where] == "freezer":
             cfg.freezer_readers.setdefault(where, ident["_id"])
-        elif kinds[where] == "station":
+        elif kinds[where] in ("station", "lab"):  # anywhere a sample can be delivered
             cfg.station_readers.setdefault(where, ident["_id"])
 
     for loc in locations:
