@@ -65,4 +65,4 @@ lists the ones it cannot place.
 
 - The requested window stays text ("2 PM"); nothing schedules by time yet.
 - No resume token on the scan feed or crash-resume of an interrupted transfer (stretch items).
-- Text-to-speech read-backs not built (stretch). Groq's free tier is rate-limited (~30 req/min, 8k tokens/min).
+- Text-to-speech prompts are being built on `feature/tts-spoken-prompts` (see ARCHITECTURE.md, "Spoken prompts"). Groq's free tier is rate-limited (~30 req/min, 8k tokens/min).

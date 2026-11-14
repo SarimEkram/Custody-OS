@@ -93,8 +93,12 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [ ] Agree `DEMO_SPEED` with C (FZ-A ↔ SEQ-3 is 2 min; TS-1077's limit is 3 min)
 - [ ] Rehearse beats 1–3 with the full system (blocked: A + C)
 
+**Spoken prompts (branch `feature/tts-spoken-prompts`)**
+- [ ] `ElevenLabsTTS` in `agent/voice.py` + `ELEVENLABS_TTS_*` env wiring in `agent/main.py`
+- [ ] `GET /transfers/{id}/readback/audio` and `GET /approvals/{id}/audio` (id only, server-built text, cached, 503 on TTS failure)
+- [ ] Dashboard: play on `confirmation_request` / pending approval, replay button, mute toggle
+
 **Stretch (only after the demo works)**
-- [ ] Spoken read-backs with ElevenLabs text-to-speech
 - [ ] Crash-resume of an interrupted transfer; resume token for the scan feed
 
 ---
