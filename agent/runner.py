@@ -1,0 +1,69 @@
+"""Runs one transfer: build the run context, drive the agent loop, and on a halt hand over
+to the recovery planner. Intake calls start() once a validated request has a transfer.
+
+A crash inside a run is kept in `errors` (not swallowed). The transfer's state only ever moved
+on scan-verified steps, so restarting from `state` is safe (see "Crash/restart" in
+ARCHITECTURE.md; resuming is a stretch item).
+"""
+
+import asyncio
+from dataclasses import dataclass
+
+from agent.executor import RunContext
+from agent.loop import AgentLoop, RunResult
+from agent.recovery import RecoveryPlanner, RecoveryResult
+from agent.transfers import MemoryCustodyStore
+
+
+@dataclass
+class Outcome:
+    run: RunResult
+    recovery: RecoveryResult | None = None
+
+
+class Runner:
+    def __init__(
+        self,
+        loop: AgentLoop,
+        planner: RecoveryPlanner,
+        store: MemoryCustodyStore,
+        requests,
+        agent_id: str = "agent:custody-01",
+    ) -> None:
+        self.loop, self.planner, self.store = loop, planner, store
+        self.requests, self.agent_id = requests, agent_id
+        self.errors: dict[str, BaseException] = {}
+        self.tasks: set[asyncio.Task] = set()
+
+    async def run(self, transfer_id: str) -> Outcome:
+        t = self.store.transfers[transfer_id]
+        refs = {k: t[k] for k in ("sample_id", "from", "to", "window") if t.get(k)}
+        ctx = RunContext(self.agent_id, t["requested_by"], t["grant_id"], transfer_id,
+                         t["request_id"], refs=refs)  # fmt: skip
+        said = self.requests.docs[t["request_id"]]["transcript"]
+        text = (
+            f'The tech said: "{said}"\n'
+            f"Validated: move {t['sample_id']} from {t['from']} to {t['to']}"
+            + (f", window {t['window']}" if t.get("window") else "")
+            + "."
+        )
+        result = await self.loop.run(text, ctx)
+        recover = result.status == "halted" or (
+            result.status in ("denied", "timeout") and result.needs_recovery
+        )
+        if not recover:
+            return Outcome(result)
+        revoker = self.store.transfers[transfer_id].get("halted_by") or t["requested_by"]
+        return Outcome(result, await self.planner.run(ctx, revoker))
+
+    def start(self, transfer_id: str) -> asyncio.Task:
+        task = asyncio.get_running_loop().create_task(self.run(transfer_id))
+        self.tasks.add(task)
+
+        def done(t: asyncio.Task) -> None:
+            self.tasks.discard(t)
+            if t.exception():
+                self.errors[transfer_id] = t.exception()
+
+        task.add_done_callback(done)
+        return task

@@ -90,7 +90,7 @@ def test_denial_recovers_only_if_something_irreversible_happened():
 def test_background_start_runs_the_transfer_and_keeps_a_crash_instead_of_swallowing_it():
     async def go(runner):
         task = runner.start("TR-1")
-        await task
+        await asyncio.wait([task])  # finished, without re-raising a crash here
         return runner
 
     ok = asyncio.run(go(build()[0]))
