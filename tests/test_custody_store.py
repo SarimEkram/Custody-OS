@@ -72,3 +72,11 @@ def test_a_verified_scan_moves_state_and_writes_the_ledger_entry_with_it():
     with pytest.raises(StateConflict):  # wrong expected state: nothing is written
         run(s.apply_verified_scan("TR-0001", "reserved", "checked_out", scan, {"id": 2}, append))
     assert written == [{"id": 1}]
+
+
+def test_set_fields_updates_the_transfer_document():
+    s = store(**{"TR-0001": 1})
+    run(s.set_fields("TR-0001", reservation_id="RES-1", courier_job_id="CJ-1"))
+    t = s.transfers["TR-0001"]
+    assert (t["reservation_id"], t["courier_job_id"]) == ("RES-1", "CJ-1")
+    assert t["state"] == "requested"  # fields only: never a state change

@@ -133,6 +133,9 @@ def test_happy_path_every_step_gated_and_state_advances_only_through_scans():
         "reserved", "checked_out", "in_transit", "received",
     ]  # fmt: skip
     assert store.samples["TS-1042"]["location_id"] == "SEQ-3" and notes == ["Transfer booked"]
+    # the gate's checkout preconditions read these off the transfer document
+    transfer = store.transfers["TR-1"]
+    assert (transfer["reservation_id"], transfer["courier_job_id"]) == ("RES-1", "CJ-1")
 
 
 def test_tool_results_go_back_to_the_model_with_matching_ids():
