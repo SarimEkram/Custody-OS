@@ -17,6 +17,17 @@ from agent.executor import RunContext, ToolCall, ToolResult
 from agent.lab import LabClient
 from agent.verifier import ScanBus
 
+# The model is told to give a `reason`, but sometimes names it differently ("why" seen live with
+# gpt-oss-120b). Those words mean the same thing, so they are read as the reason and removed from the
+# arguments. Any OTHER unknown argument still reaches the guardrail and is refused.
+REASON_ALIASES = ("reason", "why", "rationale", "justification")
+
+
+def split_reason(raw: dict) -> tuple[dict, str]:
+    """(arguments without any reason field, the reason text)."""
+    reason = next((raw[k] for k in REASON_ALIASES if isinstance(raw.get(k), str) and raw[k].strip()), "")
+    return {k: v for k, v in raw.items() if k not in REASON_ALIASES}, reason
+
 
 def _value(x) -> str:
     return str(getattr(x, "value", x))
@@ -56,8 +67,7 @@ class AtlasExecutor:
         self.timeout, self.make_context = timeout, make_context
 
     async def execute(self, call: ToolCall, ctx: RunContext) -> ToolResult:
-        args = {k: v for k, v in call.args.items() if k != "reason"}
-        reason = call.args.get("reason", "")
+        args, reason = split_reason(call.args)
         gate_ctx = self.make_context(
             transfer_id=ctx.transfer_id, on_behalf_of=ctx.on_behalf_of, grant_id=ctx.grant_id,
             request_id=ctx.request_id, actor=ctx.actor,

@@ -394,3 +394,23 @@ def test_a_halt_cancels_a_run_that_is_mid_step_and_recovery_runs_exactly_once():
     out = asyncio.run(go())
     assert calls == ["user:mokafor"] and out.run.status == "halted" and out.recovery == "recovered"
     assert json.dumps(runner.errors) == "{}"
+
+
+# ---- the model sometimes names its reason "why" (seen live): that must not get the step refused
+def test_split_reason_accepts_the_usual_synonyms_and_keeps_real_arguments():
+    from agent.atlas import split_reason
+    args, reason = split_reason({"station_id": "FOR-LAB", "window": "now", "why": "Reserve the lab for EV-2201"})
+    assert args == {"station_id": "FOR-LAB", "window": "now"} and reason == "Reserve the lab for EV-2201"
+    args, reason = split_reason({"station_id": "SEQ-3", "reason": "booked", "why": "ignored"})
+    assert args == {"station_id": "SEQ-3"} and reason == "booked"  # an explicit reason wins
+    args, reason = split_reason({"station_id": "SEQ-3", "colour": "red"})
+    assert args == {"station_id": "SEQ-3", "colour": "red"} and reason == ""  # other extras still go to the guardrail
+
+
+def test_a_why_argument_passes_the_guardrail_but_a_made_up_one_does_not():
+    from agent.atlas import split_reason
+    from agent.guardrails import validate_call
+    args, reason = split_reason({"station_id": "FOR-LAB", "window": "now", "why": "Reserve for EV-2201"})
+    assert validate_call("reserve_station", args, reason) is None
+    args, reason = split_reason({"station_id": "FOR-LAB", "window": "now", "sneaky": "x"})
+    assert validate_call("reserve_station", args, reason).rule == "invalid_arguments"
