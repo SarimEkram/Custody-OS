@@ -1,6 +1,7 @@
 import { Loader2, OctagonX } from 'lucide-react'
 import { useState } from 'react'
 import { useAgentStatus } from '../../hooks/useAgentStatus'
+import { currentGrant } from '../../lib/authority'
 import { useAuthority } from '../../hooks/useAuthority'
 import { ApiError, revokeGrant, stopAgent } from '../../lib/api'
 import { pickActiveTransfer, useCustodyStore } from '../../store/custodyStore'
@@ -81,10 +82,12 @@ export function GrantChip() {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const grantId = transfer?.grant_id
-  if (!grantId) return null
+  // Show the grant the agent acts under NOW (a re-issued one), not the one an earlier run used.
+  const current = currentGrant(grants)
+  const grantId = current?._id ?? transfer?.grant_id
+  if (!grantId || !transfer) return null
   const grant = grants[grantId]
-  const revoked = grant?.status === 'revoked' || authority.revoked || ['revoked', 'recovering', 'recovered'].includes(transfer.state)
+  const revoked = current ? false : grant?.status === 'revoked' || authority.revoked || ['revoked', 'recovering', 'recovered'].includes(transfer.state)
 
   const revoke = async () => {
     setPending(true)

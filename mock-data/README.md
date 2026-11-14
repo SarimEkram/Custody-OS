@@ -39,6 +39,10 @@ after the scan.
 | `POST /control/stop`, `POST /grants/{id}/revoke` | Halt, roll back reversible steps, recover the sample if it is out |
 | `POST /audit/query` | Canned answers: sample ID, `GRANT-0007`, "gaps", "without supervisor" |
 | `GET /audit/transfer/{id}`, `GET /audit/requests/{id}/verify` | Transfer trace (each row joined to its request) and audio hash re-check |
+| `GET /transfers/{id}/readback/audio` | A short tone standing in for the spoken read-back (real: MP3 from text-to-speech). 409 when nothing is pending; 404 when TTS is off |
+| `POST /transfers/{id}/confirm/voice` | The **proposed** voice-confirmation contract. Decides on the server: "confirm" / "yes, confirm" confirm; "cancel", "don't confirm", "no" do not. Requester only. Ledger records `method: "voice"` and the transcript |
+| `POST /mock/heard` `{text}` | Test switch: what the mock "hears" next from `confirm/voice` (default `confirm`) |
+| `POST /mock/tts` `{on}` / `POST /mock/voice-confirm` `{on}` | Test switches: spoken read-back on/off (also env `MOCK_TTS=0`); the `confirm/voice` route on/off (off = 404 "Not Found", like the real backend today) |
 | `POST /mock/seed-gap` | Test helper: an irreversible action that was sent but never scanned, so "Find custody gaps" has something to find |
 | `POST /mock/reset` | Clears all mock state (mock-only helper) |
 | `GET /voice/requests/{id}/audio` | Not implemented, so the audio player shows "unavailable" |

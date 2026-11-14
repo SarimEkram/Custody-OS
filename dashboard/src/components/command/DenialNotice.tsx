@@ -1,4 +1,4 @@
-import { ShieldX } from 'lucide-react'
+import { ShieldAlert, ShieldX } from 'lucide-react'
 import { useMemo } from 'react'
 import { denialFor } from '../../lib/authority'
 import { explainRule, GRANT_RULES } from '../../lib/rules'
@@ -17,9 +17,13 @@ export function DenialNotice() {
   if (!transfer || !denial) return null
 
   const primary = explainRule(denial.rules[0] ?? 'denied')
+  const guard = primary.kind === 'guardrail'
   return (
-    <section role="alert" className="slot-in rounded-xl bg-surface p-4 ring-1 ring-bad/40">
-      <h3 className="flex items-center gap-2 text-sm font-semibold"><ShieldX size={16} className="text-bad" aria-hidden /> Request denied: {primary.title}</h3>
+    <section role="alert" className={`slot-in rounded-xl bg-surface p-4 ring-1 ${guard ? 'ring-warn/50' : 'ring-bad/40'}`}>
+      <h3 className="flex items-center gap-2 text-sm font-semibold">
+        {guard ? <ShieldAlert size={16} className="text-warn" aria-hidden /> : <ShieldX size={16} className="text-bad" aria-hidden />}
+        {guard ? 'A safety check refused the agent' : 'Request denied'}: {primary.title}
+      </h3>
       <p className="mt-1.5 text-[13px]">{primary.why}</p>
       <p className="mt-1 text-[13px] text-muted">
         {denial.nothingPhysical ? 'Nothing physical happened and no lab system was changed. ' : ''}

@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ClipboardCheck, FileAudio, Gavel, OctagonX, RotateCcw, ScanLine, ShieldCheck, Undo2, type LucideIcon } from 'lucide-react'
 import { useMemo } from 'react'
 import { decisionView, formatTime, humanizeText, toolLabel } from '../../lib/format'
+import { explainRunEnd, isRunEnd, runEndStatus } from '../../lib/runEnd'
 import type { LedgerEntry, ScanEvent, VoiceRequestDoc } from '../../lib/types'
 import { Badge, Mono, toneText } from '../ui/Badge'
 import type { Tone } from '../../lib/format'
@@ -44,7 +45,7 @@ export function buildTimeline(entries: LedgerEntry[], scans: ScanEvent[], reques
         items.push({ ...base, icon: ClipboardCheck, tone: 'ok', stage: 'Read-back confirmation', title: `Confirmed by ${String(e.response?.confirmed_by ?? e.on_behalf_of)}` })
         break
       case 'decision':
-        items.push({ ...base, icon: e.decision === 'halt' ? OctagonX : ShieldCheck, tone: d.tone, stage: e.decision === 'halt' ? 'Revocation / halt' : 'Policy decision', title: `${toolLabel(e.tool)} · ${d.label}`, detail: `${e.summary ?? ''} Policy ${e.policy_id}@${e.policy_version}`.trim() })
+        items.push({ ...base, icon: e.decision === 'halt' ? OctagonX : ShieldCheck, tone: d.tone, stage: e.decision === 'halt' ? 'Revocation / halt' : 'Policy decision', title: `${toolLabel(e.tool)} · ${d.label}`, detail: `${humanizeText(e.summary)} Policy ${e.policy_id}@${e.policy_version}`.trim() })
         break
       case 'outcome': {
         const scanned = scans.some((s) => s.correlation_id === e.correlation_id)
@@ -66,6 +67,10 @@ export function buildTimeline(entries: LedgerEntry[], scans: ScanEvent[], reques
         items.push({ ...base, icon: Gavel, tone: e.response?.exceeded ? 'bad' : 'ok', stage: 'Final exposure', title: `${String(e.response?.minutes_out ?? '?')} min out · ${e.response?.exceeded ? 'limit exceeded' : 'within limit'}` })
         break
       case 'violation':
+        if (isRunEnd(e)) {
+          items.push({ ...base, icon: AlertTriangle, tone: 'warn', stage: 'Run ended early (a failure, not a policy decision)', title: explainRunEnd(runEndStatus(e)).title })
+          break
+        }
         items.push({ ...base, icon: AlertTriangle, tone: 'bad', stage: 'Violation', title: humanizeText(e.summary) || 'Violation recorded' })
         break
       default:

@@ -3,6 +3,8 @@
 import { create } from 'zustand'
 import { resolveCourier } from '../lib/courier'
 import { mergeById, scanKey } from '../lib/normalize'
+import { applyGrantEvidence } from '../lib/authority'
+import { isRunEnd } from '../lib/runEnd'
 import { DEFAULT_GRANT_ID, SEED_LOCATIONS, SEED_SAMPLES } from '../lib/seed'
 import type {
   Approval,
@@ -133,8 +135,12 @@ export const useCustodyStore = create<CustodyState>((set) => ({
           const ledger = mergeById(st.ledger, [e.data], (x) => x._id, byTime).slice(-LEDGER_CAP)
           if (ledger === st.ledger) return {}
           const patch: Partial<CustodyState> = { ledger }
+          const grants = applyGrantEvidence(st.grants, e.data)
+          if (grants !== st.grants) patch.grants = grants
+          // A new grant ends the "no active grant" refusal: the person can send a request again right away.
+          if (e.data.rule_hits?.includes('grant_reissued')) patch.noGrantAt = null
           // A halt entry is the backend acknowledging the stop.
-          if (e.data.decision === 'halt' && st.stopPhase === 'requested') patch.stopPhase = 'idle'
+          if (e.data.decision === 'halt' && !isRunEnd(e.data) && st.stopPhase === 'requested') patch.stopPhase = 'idle'
           return patch
         }
         case 'transfer': {

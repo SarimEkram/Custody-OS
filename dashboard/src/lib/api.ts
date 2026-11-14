@@ -1,7 +1,7 @@
 // The ONLY module that talks to the agent service. The browser never contacts
 // MongoDB or ElevenLabs. Base URL defaults to /api (Vite proxies it to :8000 and
 // strips the prefix, so /api/voice/requests → FastAPI POST /voice/requests).
-import type { AudioVerification, AuditResult, IntakeResponse, ReissueResult, Snapshot } from './types'
+import type { AudioVerification, AuditResult, IntakeResponse, ReissueResult, Snapshot, VoiceConfirmResult } from './types'
 
 export const API_BASE: string = import.meta.env.VITE_API_BASE ?? '/api'
 
@@ -84,6 +84,19 @@ export const confirmTransfer = (transferId: string, userId: string, method: 'but
 
 export const decideApproval = (approvalId: string, userId: string, decision: 'approved' | 'denied') =>
   request<void>(`/approvals/${encodeURIComponent(approvalId)}`, post({ user_id: userId, decision }))
+
+/**
+ * Confirm a read-back by voice. The clip goes to the backend, which transcribes it and decides whether it was a
+ * confirmation. The dashboard never decides what was said, and identity is `user_id`, never the voice.
+ */
+export async function confirmByVoice(transferId: string, userId: string, audio: Blob): Promise<VoiceConfirmResult> {
+  const form = new FormData()
+  form.append('audio', audio, 'confirm.webm')
+  form.append('user_id', userId)
+  const r = await request<Partial<VoiceConfirmResult> | undefined>(`/transfers/${encodeURIComponent(transferId)}/confirm/voice`, { method: 'POST', body: form })
+  if (!r || typeof r.confirmed !== 'boolean') throw new ApiError('invalid', 'Voice confirmation returned an unexpected response')
+  return { confirmed: r.confirmed, transcript: r.transcript, reason: r.reason }
+}
 
 export const stopAgent = (userId: string, transferId: string | null = null) =>
   request<void>('/control/stop', post({ user_id: userId, scope: transferId ? 'transfer' : 'all', transfer_id: transferId }))

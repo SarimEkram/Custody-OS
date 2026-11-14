@@ -205,6 +205,10 @@ export interface CourierSignal {
   y?: number
   job_id?: string
   sample_id?: string
+  /** Set by the backend after a reroute home: the destination it was originally heading for. */
+  original_to?: string
+  /** ...and how far along that outbound leg it had got (0-1) when it turned back. */
+  return_from_progress?: number
 }
 
 /** Where the dashboard draws the courier (map coordinates), resolved from a CourierSignal. */
@@ -267,6 +271,13 @@ export interface AuditResult {
   gaps?: AuditRow[]
   /** The raw rows; for the exposure report these are per-sample aggregates. */
   rows?: unknown
+}
+
+/** POST /transfers/{id}/confirm/voice: the backend decides whether the clip was a confirmation. */
+export interface VoiceConfirmResult {
+  confirmed: boolean
+  transcript?: string
+  reason?: string
 }
 
 /** GET /audit/requests/{id}/verify */

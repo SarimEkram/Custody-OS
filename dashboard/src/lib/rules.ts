@@ -5,6 +5,8 @@ export interface RuleExplanation {
   title: string
   why: string
   next: string
+  /** policy: the gate applied a rule. guardrail: a safety check refused the agent's own call. failure: the run broke. */
+  kind?: 'policy' | 'guardrail' | 'failure'
 }
 
 /** Rules that mean "the agent has no valid authority". Used to tell a revoked grant from an ordinary denial. */
@@ -80,6 +82,37 @@ const RULES: Record<string, RuleExplanation> = {
     title: 'Not allowed during recovery',
     why: 'Only a short list of safe actions can run while recovering a sample.',
     next: 'Wait for recovery to finish.',
+  },
+  // ---- guardrails (GUARDRAILS_SPEC.md): safety checks on the agent's own calls. Nothing runs when one refuses. ----
+  unknown_tool: {
+    title: 'The agent asked for a tool that doesn’t exist',
+    why: 'The assistant named a tool outside the approved list, so the call was refused before anything ran.',
+    next: 'Nothing was changed. Send the request again. If it keeps happening, tell the team.',
+    kind: 'guardrail',
+  },
+  invalid_arguments: {
+    title: 'The agent sent an incomplete or invalid instruction',
+    why: 'A step had missing or malformed details (for example free text where an ID belongs), so it was refused.',
+    next: 'Nothing was changed. Send the request again, or rephrase it.',
+    kind: 'guardrail',
+  },
+  args_not_bound_to_transfer: {
+    title: 'The agent tried to act on something you didn’t confirm',
+    why: 'A step named a different sample, route or transfer than the plan you confirmed, so it was refused. The agent can only run the plan you approved.',
+    next: 'Nothing was changed for that step. If this was unexpected, check the read-back and the activity list.',
+    kind: 'guardrail',
+  },
+  duplicate_irreversible_step: {
+    title: 'That step is already done or awaiting its scan',
+    why: 'The agent tried to repeat a step that can’t be undone (such as checking the sample out) before the first attempt was confirmed by a scanner.',
+    next: 'Wait for the scanner to confirm the first attempt. Nothing was done twice.',
+    kind: 'guardrail',
+  },
+  gate_unavailable: {
+    title: 'The safety check couldn’t run',
+    why: 'The system couldn’t load what it needed to decide, so it refused rather than guess (it fails closed).',
+    next: 'Nothing was changed. Try again shortly. If it persists, the database or policy may be unavailable.',
+    kind: 'guardrail',
   },
   stop_switch: {
     title: 'Stopped with the Stop switch',

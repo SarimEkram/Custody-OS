@@ -3,6 +3,7 @@ import { AuthorityBanner } from '../components/command/AuthorityBanner'
 import { CommandBar } from '../components/command/CommandBar'
 import { DenialNotice } from '../components/command/DenialNotice'
 import { ReadbackCard } from '../components/command/ReadbackCard'
+import { RunEndNotice } from '../components/command/RunEndNotice'
 import { LedgerStream } from '../components/ledger/LedgerStream'
 import { LabMap } from '../components/map/LabMap'
 import { WorkflowStatus } from '../components/workflow/WorkflowStatus'
@@ -22,6 +23,7 @@ export function ControlCenter() {
         </div>
         <div className="flex min-h-0 flex-col gap-4 lg:col-span-2">
           <DenialNotice />
+          <RunEndNotice />
           <ReadbackCard />
           <ApprovalInbox />
           <WorkflowStatus />

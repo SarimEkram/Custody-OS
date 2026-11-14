@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, CircleAlert, Loader2, Volume2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleAlert, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiError, confirmTransfer } from '../../lib/api'
 import { groupLedger } from '../../lib/actions'
@@ -6,6 +6,7 @@ import { toolLabel } from '../../lib/format'
 import { pickActiveTransfer, STOPPED_STATES, useCustodyStore } from '../../store/custodyStore'
 import { Mono } from '../ui/Badge'
 import { Drawer } from '../ui/Drawer'
+import { VoiceConfirmStrip } from './VoiceConfirmStrip'
 
 /**
  * Read-back card. Shown when the backend sends a `confirmation_request`, or the transfer is blocked with
@@ -26,6 +27,17 @@ export function ReadbackCard() {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState(false)
+
+  // State belongs to one transfer. When a different transfer's read-back shows up, start clean
+  // (otherwise the next request's Confirm button would still say "Waiting for the backend...").
+  const currentId = transfer?._id ?? null
+  const [stateFor, setStateFor] = useState<string | null>(currentId)
+  if (stateFor !== currentId) {
+    setStateFor(currentId)
+    setPending(false)
+    setError(null)
+    setReviewing(false)
+  }
 
   const done = useMemo(
     () => (transfer ? groupLedger(ledger.filter((e) => e.transfer_id === transfer._id), scans).filter((i) => i.kind === 'action' && i.status === 'Done') : []),
@@ -107,11 +119,6 @@ export function ReadbackCard() {
         </p>
       )}
       {rb?.readback_text && <p className="mt-3 rounded-lg bg-panel px-3 py-2.5 text-[14px] leading-snug">“{rb.readback_text}”</p>}
-      {rb?.audio_url && (
-        <button onClick={() => void new Audio(rb.audio_url ?? '').play().catch(() => setError('Could not play the audio. The text above is what counts.'))} className="mt-2 flex items-center gap-1.5 text-xs text-info hover:underline">
-          <Volume2 size={14} aria-hidden /> Play read-back
-        </button>
-      )}
       <p className="mt-3 text-xs text-muted">Nothing irreversible happens until you confirm.</p>
       {error && <p role="alert" className="mt-2 text-sm text-bad">{error}</p>}
       <div className="mt-3 flex gap-2">
@@ -120,6 +127,9 @@ export function ReadbackCard() {
           Review
         </button>
       </div>
+
+      {/* The agent reads this aloud, then listens ~10 s for "confirm". The backend judges what was said. */}
+      <VoiceConfirmStrip transferId={transfer._id} flowId={rb?.id ?? 'pending'} audioUrl={rb?.audio_url ?? null} userId={identityId} suspended={pending} />
 
       <Drawer open={reviewing} title="Review before confirming" onClose={() => setReviewing(false)}>
         <div className="space-y-6">
