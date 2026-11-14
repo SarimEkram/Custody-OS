@@ -44,9 +44,11 @@ class ConfirmationService:
         emit: Callable[[dict], None],
         catalog: Catalog,
         clock: Callable[[], datetime] = lambda: datetime.now().astimezone(),
+        recorder: Callable[[str, str, str, str], Awaitable[None]] | None = None,
     ) -> None:
         self.store, self.append, self.signals, self.emit = store, append, signals, emit
         self.catalog, self.clock = catalog, clock
+        self.recorder = recorder  # Atlas mode: the gate records the confirmation and unblocks
         self.pending: dict[str, dict] = {}
         self.count = 0
 
@@ -68,17 +70,25 @@ class ConfirmationService:
             raise NoPending(transfer_id)
         if user_id != transfer["requested_by"]:
             raise NotRequester(user_id)
-        await self.append({
-            "timestamp": self.clock(), "entry_type": "confirmation", "actor": user_id,
-            "on_behalf_of": user_id, "grant_id": transfer["grant_id"], "policy_id": "readback",
-            "policy_version": 1, "decision": "allow", "transfer_id": transfer_id,
-            "sample_id": transfer["sample_id"], "request_id": transfer["request_id"],
-            "correlation_id": f"c-{uuid.uuid4().hex[:8]}", "tool": None,
-            "response": {"readback_text": pending["text"], "confirmed_by": user_id,
-                         "method": method, "confirmation_request_id": pending["id"]},
-            "summary": f"{user_id} confirmed the read-back by {method}.",
-        })  # fmt: skip
-        await self.store.confirm_readback(transfer_id)
+        if self.recorder:
+            try:
+                await self.recorder(transfer_id, user_id, pending["text"], method)
+            except PermissionError as e:
+                raise NotRequester(user_id) from e
+            except ValueError as e:
+                raise KeyError(transfer_id) from e
+        else:
+            await self.append({
+                "timestamp": self.clock(), "entry_type": "confirmation", "actor": user_id,
+                "on_behalf_of": user_id, "grant_id": transfer["grant_id"], "policy_id": "readback",
+                "policy_version": 1, "decision": "allow", "transfer_id": transfer_id,
+                "sample_id": transfer["sample_id"], "request_id": transfer["request_id"],
+                "correlation_id": f"c-{uuid.uuid4().hex[:8]}", "tool": None,
+                "response": {"readback_text": pending["text"], "confirmed_by": user_id,
+                             "method": method, "confirmation_request_id": pending["id"]},
+                "summary": f"{user_id} confirmed the read-back by {method}.",
+            })  # fmt: skip
+            await self.store.confirm_readback(transfer_id)
         del self.pending[transfer_id]
         self.signals.signal(f"confirm:{transfer_id}", "confirmed")
 

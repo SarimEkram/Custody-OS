@@ -50,11 +50,13 @@ class RecoveryPlanner:
         freezers: dict[str, set[str]],
         bus,
         demo_speed: float = 60.0,
+        log_exposure: bool = True,  # False when custody.apply_verified_scan writes exposure rows
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.executor, self.store, self.append = executor, store, append
         self.read_outcomes, self.job_state, self.freezers = read_outcomes, job_state, freezers
         self.bus, self.demo_speed, self.clock = bus, demo_speed, clock
+        self.log_exposure = log_exposure
         self.n = 0
 
     async def _call(self, ctx: RunContext, name: str, **args):
@@ -153,6 +155,14 @@ class RecoveryPlanner:
                 rule_hits=["return_unconfirmed"],
             )
             return RecoveryResult("unconfirmed", freezer)
+
+        if (
+            not self.log_exposure
+        ):  # custody wrote the exposure/violation rows and flagged the sample
+            exceeded = (await self.store.get_sample(sample_id))["status"] == "compromised"
+            return RecoveryResult(
+                "recovered_late" if exceeded else "recovered", freezer, None, exceeded
+            )
 
         scanned_at = self.bus.scans[res.correlation_id]["scanned_at"]
         minutes_out = (scanned_at - out_at).total_seconds() * self.demo_speed / 60

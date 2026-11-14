@@ -7,9 +7,16 @@ from agent.transfers import MemoryCustodyStore
 TRANSFER = {"_id": "TR-1", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "window": "2 PM",
             "requested_by": "user:jlee", "grant_id": "GRANT-0007", "request_id": "VR-1",
             "state": "requested", "history": []}  # fmt: skip
-REQUESTS = type(
-    "R", (), {"docs": {"VR-1": {"transcript": "Move TS-1042 to Sequencing Station 3."}}}
-)()
+
+
+class Requests:
+    docs = {"VR-1": {"transcript": "Move TS-1042 to Sequencing Station 3."}}
+
+    async def get(self, request_id):
+        return self.docs[request_id]
+
+
+REQUESTS = Requests()
 
 
 class Loop:

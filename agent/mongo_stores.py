@@ -127,6 +127,12 @@ class MongoRequests:
     async def insert(self, doc: dict) -> None:
         await self.db.voice_requests.insert_one(doc)
 
+    async def get(self, request_id: str) -> dict:
+        doc = await self.db.voice_requests.find_one({"_id": request_id})
+        if doc is None:
+            raise KeyError(request_id)
+        return doc
+
 
 class MongoAudio:
     """GridFS bucket `voice_audio`; the SHA-256 is stored on the voice_requests doc."""

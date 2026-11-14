@@ -39,6 +39,9 @@ class MemoryRequests:
     async def insert(self, doc: dict) -> None:
         self.docs[doc["_id"]] = doc
 
+    async def get(self, request_id: str) -> dict:
+        return self.docs[request_id]
+
 
 Parser = Callable[[str], Awaitable[dict]]
 

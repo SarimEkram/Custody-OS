@@ -57,9 +57,11 @@ class AgentLoop:
         signals: Signals | None = None,
         confirmations=None,
         wait_timeout: float = 300.0,
+        manage_blocking: bool = True,  # False when the gate itself blocks/unblocks the transfer
     ) -> None:
         self.llm, self.executor, self.store, self.max_steps = llm, executor, store, max_steps
         self.signals, self.confirmations, self.wait_timeout = signals, confirmations, wait_timeout
+        self.manage_blocking = manage_blocking
 
     async def _sync_state(self, ctx: RunContext) -> None:
         """requested -> reserved once the station is held and the courier is booked."""
@@ -88,10 +90,12 @@ class AgentLoop:
                     "approval_pending",
                     f"approval:{(res.content or {}).get('approval_id')}",
                 )
-            await self.store.block(tid, reason)
+            if self.manage_blocking:
+                await self.store.block(tid, reason)
             outcome = await self.signals.wait(key, self.wait_timeout)
             if outcome in ("confirmed", "approved"):
-                await self.store.unblock(tid)
+                if self.manage_blocking:
+                    await self.store.unblock(tid)
                 res = await self.executor.execute(call, ctx)
                 continue
             before = (await self.store.get_transfer(tid))["blocked_from"]
