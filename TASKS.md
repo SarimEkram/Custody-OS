@@ -57,7 +57,7 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] Test auditor LLM routing: 6 demo questions all routed correctly by the LLM (`routed_by: llm`), 0.5-2 s each
 - [ ] Gate + verifier end to end with the real agent (B's agent loop is on `main` now; needs a live run)
 - [ ] Rehearse beats 1–3 with the full system (blocked: B + C)
-- [ ] Check auditor results in the dashboard (blocked: C, needs the auditor panel)
+- [x] Check auditor results in the dashboard: ran the real agent + dashboard proxy; responses match C's `AuditResult`; added the original request (`requests`) so the timeline starts from it. Still to eyeball in a browser after the live run
 
 **Stretch (only after the demo works)**
 - [ ] Gate-signed token that lab services verify
