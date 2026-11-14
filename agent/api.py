@@ -1,5 +1,7 @@
 """HTTP API the dashboard calls. Typed requests are the always-working fallback for voice."""
 
+from typing import Annotated
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
@@ -33,7 +35,8 @@ def create_app(intake: Intake, voice: VoiceIntake | None = None) -> FastAPI:
 
         @app.post("/voice/requests", status_code=201)
         async def post_voice(
-            user_id: str = Form(pattern=r"^user:"), audio: UploadFile = File(...)
+            user_id: Annotated[str, Form(pattern=r"^user:")],
+            audio: Annotated[UploadFile, File()],
         ) -> dict:
             try:
                 return await voice.submit(
