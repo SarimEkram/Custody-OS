@@ -110,3 +110,13 @@ def test_flaky_courier_picks_up_but_emits_no_scan(ctx):
     client.post("/admin/flaky", json={"drop_scans": True})
     r = client.post(f"/jobs/{jid}/pickup", headers=CID)
     assert r.status_code == 200 and r.json()["scan_emitted"] is False and scans == []
+
+
+def test_listing_jobs_gives_the_ticker_everything_in_flight(ctx):
+    client, clock, _ = ctx
+    a, b = job(client).json()["job_id"], job(client).json()["job_id"]
+    client.post(f"/jobs/{a}/pickup", headers=CID)
+    clock.t += 1
+    listed = {j["job_id"]: j for j in client.get("/jobs").json()}
+    assert set(listed) == {a, b} and listed[a]["status"] == "in_transit"
+    assert listed[a]["progress"] == pytest.approx(0.25) and listed[b]["status"] == "assigned"
