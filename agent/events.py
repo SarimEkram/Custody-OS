@@ -49,8 +49,10 @@ async def merged_stream(feed: AsyncIterator[dict], hub: EventHub) -> AsyncIterat
 class CourierTicker:
     """Polls the courier and publishes where each moving sample is (in memory, SSE only)."""
 
+    # 0.4 s matches the dashboard's `.glide` transition (globals.css): one tick per glide, so the
+    # courier moves continuously instead of gliding then pausing. In memory/SSE only, no DB writes.
     def __init__(self, list_jobs: Callable[[], Awaitable[list[dict]]], hub: EventHub,
-                 interval: float = 1.0) -> None:  # fmt: skip
+                 interval: float = 0.4) -> None:  # fmt: skip
         self.list_jobs, self.hub, self.interval = list_jobs, hub, interval
 
     async def tick(self) -> None:

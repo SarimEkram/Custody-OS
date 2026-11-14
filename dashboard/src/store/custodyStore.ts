@@ -210,13 +210,13 @@ export function verifiedLocation(sampleId: string, scans: ScanEvent[], fallback:
   return { location: fallback }
 }
 
-/** Active exposure for a sample: last verified checkout with no later check-in. */
+/** Active exposure for a sample: last verified checkout with no later check-in or delivery (intake), as the backend counts it. */
 export function activeExposure(sampleId: string, scans: ScanEvent[]): { checkedOutAt: string } | null {
   let out: string | null = null
   for (const s of scans) {
     if (s.sample_id !== sampleId) continue
     if (s.type === 'checkout') out = s.scanned_at
-    if (s.type === 'checkin') out = null
+    if (s.type === 'checkin' || s.type === 'intake') out = null
   }
   return out ? { checkedOutAt: out } : null
 }

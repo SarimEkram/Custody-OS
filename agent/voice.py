@@ -9,11 +9,12 @@ is read fully before the check, so put a body-size limit in front of this for a 
 """
 
 import hashlib
+import re
 from collections.abc import Awaitable, Callable
 
 import httpx
 
-from agent.confirmation import ConfirmationService, NoPending
+from agent.confirmation import ConfirmationService, NoPending, NotRequester
 from agent.intake import Intake, NoGrant
 from agent.parse import Catalog
 
@@ -189,6 +190,44 @@ class VoiceIntake:
                  "language_probability": heard.get("language_probability"),
                  "keyterms": keyterms, "transcription_id": heard.get("transcription_id")},
         )  # fmt: skip
+
+
+def says_confirm(text: str) -> bool:
+    """Only "confirm" on its own counts; "yes", "don't confirm" or anything else is a denial."""
+    return re.sub(r"[^a-z\s]", "", text.lower()).split() == ["confirm"]
+
+
+class VoiceConfirm:
+    """A spoken answer to a read-back. The server transcribes it and decides, never the browser.
+
+    Identity is the logged-in user (who must be the requester), never the voice. No keyterms are
+    sent, so speech-to-text is not nudged towards hearing "confirm".
+    """
+
+    def __init__(self, stt, confirmations: ConfirmationService, max_bytes: int = 1_048_576) -> None:
+        self.stt, self.confirmations, self.max_bytes = stt, confirmations, max_bytes
+
+    async def submit(self, transfer_id: str, user_id: str, audio: bytes, filename: str) -> dict:
+        if not audio:
+            raise NoSpeech("empty audio")
+        if len(audio) > self.max_bytes:
+            raise TooLarge(f"audio is {len(audio)} bytes; the limit is {self.max_bytes}")
+        transfer = await self.confirmations.store.get_transfer(transfer_id)  # KeyError -> 404
+        if transfer_id not in self.confirmations.pending:
+            raise NoPending(transfer_id)
+        if user_id != transfer["requested_by"]:  # checked before spending STT on it
+            raise NotRequester(user_id)
+        try:
+            heard = await self.stt.transcribe(audio, filename, [])
+        except STTError as e:
+            raise VoiceUnavailable(str(e)) from e
+        text = (heard.get("text") or "").strip()
+        if not text:
+            raise NoSpeech("no speech detected")
+        if not says_confirm(text):
+            return {"confirmed": False, "transcript": text, "reason": "not_confirm"}
+        await self.confirmations.confirm(transfer_id, user_id, "voice")
+        return {"confirmed": True, "transcript": text}
 
 
 def sniff_audio_type(head: bytes) -> str:

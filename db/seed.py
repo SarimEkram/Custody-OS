@@ -12,6 +12,7 @@ import asyncio
 import sys
 from datetime import datetime, timedelta
 
+import certifi
 import gridfs
 from bson import ObjectId
 from pymongo import MongoClient
@@ -261,7 +262,9 @@ async def seed_history() -> None:
 
 
 def main() -> None:
-    db = MongoClient(settings.mongodb_uri_admin, tz_aware=True)[settings.mongodb_db]
+    db = MongoClient(settings.mongodb_uri_admin, tlsCAFile=certifi.where(), tz_aware=True)[
+        settings.mongodb_db
+    ]
     if "--reset" in sys.argv:
         reset_mutable(db)
     upsert_reference(db)

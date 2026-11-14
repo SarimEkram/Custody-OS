@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from agent.loop import RunResult
 from agent.runner import Runner
 from agent.transfers import MemoryCustodyStore
@@ -68,7 +70,7 @@ def test_the_run_context_comes_from_the_transfer_and_the_agent_acts_for_the_requ
 
 
 def test_a_normal_finish_runs_no_recovery():
-    runner, _, planner = build()
+    runner, _, planner = build(state="received")
     out = run(runner)
     assert out.run.status == "done" and out.recovery is None and planner.calls == []
 
@@ -89,9 +91,17 @@ def test_denial_recovers_only_if_something_irreversible_happened():
     runner, _, planner = build(RunResult("denied", needs_recovery=True))
     run(runner)
     assert len(planner.calls) == 1
-    runner, _, planner = build(RunResult("denied", needs_recovery=False))
+    runner, _, planner = build(RunResult("denied", needs_recovery=False), state="cancelled")
     run(runner)
     assert planner.calls == []
+
+
+@pytest.mark.parametrize("state", ["requested", "reserved"])
+def test_a_run_that_ends_before_anything_moved_is_rolled_back_and_closed(state):
+    # e.g. the model gave up after a denial: without this the transfer looks busy for ever
+    runner, _, planner = build(RunResult("done"), state=state)
+    out = run(runner)
+    assert planner.calls == [("TR-1", "user:jlee")] and out.recovery == "recovered"
 
 
 def test_background_start_runs_the_transfer_and_keeps_a_crash_instead_of_swallowing_it():

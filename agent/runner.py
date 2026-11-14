@@ -7,12 +7,15 @@ ARCHITECTURE.md; resuming is a stretch item).
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from agent.executor import RunContext
 from agent.loop import AgentLoop, RunResult
 from agent.recovery import RecoveryPlanner, RecoveryResult
 from agent.transfers import MemoryCustodyStore
+
+log = logging.getLogger("custody.runner")
 
 
 @dataclass
@@ -40,12 +43,23 @@ class Runner:
         self.loop_tasks: dict[str, asyncio.Task] = {}
         self.halts: dict[str, str] = {}  # transfer -> who halted it
         self.tasks: set[asyncio.Task] = set()
+        self.running: set[str] = set()  # transfers whose run() has not returned yet
+
+    def _ctx(self, t: dict) -> RunContext:
+        refs = {k: t[k] for k in ("sample_id", "from", "to", "window") if t.get(k)}
+        return RunContext(self.agent_id, t["requested_by"], t["grant_id"], t["_id"],
+                          t["request_id"], refs=refs)  # fmt: skip
 
     async def run(self, transfer_id: str) -> Outcome:
+        self.running.add(transfer_id)
+        try:
+            return await self._run(transfer_id)
+        finally:
+            self.running.discard(transfer_id)
+
+    async def _run(self, transfer_id: str) -> Outcome:
         t = await self.store.get_transfer(transfer_id)
-        refs = {k: t[k] for k in ("sample_id", "from", "to", "window") if t.get(k)}
-        ctx = RunContext(self.agent_id, t["requested_by"], t["grant_id"], transfer_id,
-                         t["request_id"], refs=refs)  # fmt: skip
+        ctx = self._ctx(t)
         said = (await self.requests.get(t["request_id"]))["transcript"]
         said = said.replace("<untrusted>", "").replace("</untrusted>", "")  # cannot close its fence
         text = (
@@ -64,9 +78,14 @@ class Runner:
             result = RunResult("halted")
         finally:
             self.loop_tasks.pop(transfer_id, None)
-        recover = result.status == "halted" or (
+        recover = result.status == "halted" or transfer_id in self.halts or (
             result.status in ("denied", "timeout", *ABORTED) and result.needs_recovery
         )
+        if not recover:
+            # The run ended before anything left storage (e.g. the model gave up after a denial):
+            # roll back what it booked and close the transfer, or it stays "requested" (looks busy).
+            state = (await self.store.get_transfer(transfer_id))["state"]
+            recover = state in ("requested", "reserved") or transfer_id in self.halts
         if not recover:
             return Outcome(result)
         stored = (await self.store.get_transfer(transfer_id)).get("halted_by")
@@ -81,15 +100,27 @@ class Runner:
         task = self.loop_tasks.get(transfer_id)
         if task and not task.done():
             task.cancel()
+        elif transfer_id not in self.running:
+            # No run to hand over (it already ended, or the agent restarted): recover here, or the
+            # transfer stays "revoked" for good.
+            self._track(transfer_id, self.recover(transfer_id, by))
+
+    async def recover(self, transfer_id: str, by: str) -> Outcome:
+        ctx = self._ctx(await self.store.get_transfer(transfer_id))
+        return Outcome(RunResult("halted"), await self.planner.run(ctx, by))
 
     def start(self, transfer_id: str) -> asyncio.Task:
-        task = asyncio.get_running_loop().create_task(self.run(transfer_id))
+        return self._track(transfer_id, self.run(transfer_id))
+
+    def _track(self, transfer_id: str, coro) -> asyncio.Task:
+        task = asyncio.get_running_loop().create_task(coro)
         self.tasks.add(task)
 
         def done(t: asyncio.Task) -> None:
             self.tasks.discard(t)
-            if t.exception():
+            if not t.cancelled() and t.exception():
                 self.errors[transfer_id] = t.exception()
+                log.error("run for %s failed", transfer_id, exc_info=t.exception())
 
         task.add_done_callback(done)
         return task

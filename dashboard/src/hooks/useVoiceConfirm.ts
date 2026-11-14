@@ -255,7 +255,13 @@ export function useVoiceConfirm({ transferId, flowId, audioUrl, userId, suspende
     stopAll()
     dispatch({ type: 'reset' })
   }, [suspended, stopAll])
-  useEffect(() => stopAll, [stopAll])
+  useEffect(
+    () => () => {
+      stopAll()
+      startedFlow.current = null // a remount (StrictMode's dev double-mount included) reads it aloud again
+    },
+    [stopAll],
+  )
 
   // "Confirmed" only means the backend accepted it. If the transfer update never follows, say so.
   const confirming = state.phase === 'confirming'

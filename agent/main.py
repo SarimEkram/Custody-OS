@@ -33,7 +33,7 @@ from agent.recovery import RecoveryPlanner
 from agent.runner import Runner
 from agent.scripted import ScriptedLLM, rule_parser
 from agent.signals import Signals
-from agent.voice import SpokenPrompts, VoiceIntake
+from agent.voice import SpokenPrompts, VoiceConfirm, VoiceIntake
 
 
 @dataclass
@@ -130,7 +130,9 @@ def build_service(b: Backends) -> Service:
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
     speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
-    app = create_b_routes(intake, voice, confirmations, speech, requests=b.requests, audio=b.audio)
+    voice_confirm = VoiceConfirm(b.stt, confirmations, b.max_audio_bytes) if b.stt else None
+    app = create_b_routes(intake, voice, confirmations, speech, requests=b.requests, audio=b.audio,
+                          voice_confirm=voice_confirm)  # fmt: skip
 
     def stream_events() -> AsyncIterator[dict]:
         return merged_stream(b.event_feed(), hub)
@@ -241,6 +243,10 @@ def create_app() -> FastAPI:
         catalog.samples.update(loaded.samples)
         catalog.locations.update(loaded.locations)
         freezers.update(await load_freezers(db))
+        # Halted before a restart and never finished recovering: finish now, or they stay "revoked".
+        stuck = {"halt": True, "state": {"$in": ["revoked", "recovering"]}}
+        async for tr in db.transfers.find(stuck):
+            await service.runner.halt(tr["_id"], tr.get("halted_by") or tr["requested_by"])
         background = [
             asyncio.create_task(watchers.Watchers(
                 on_halt=service.on_halt, on_approval=service.on_approval, on_scan=service.on_scan

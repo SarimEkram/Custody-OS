@@ -131,3 +131,60 @@ def test_confirm_endpoint_statuses():
     )
     assert client.post("/transfers/TR-9/confirm", json=body).status_code == 404
     assert client.post("/transfers/TR-1/confirm", json=body).json() == {"confirmed": True}
+
+
+class SaidSTT:
+    model_id = "scribe_v3"
+
+    def __init__(self, text):
+        self.text, self.calls = text, 0
+
+    async def transcribe(self, audio, filename, keyterms):
+        self.calls += 1
+        assert keyterms == []  # never bias the recogniser towards "confirm"
+        return {"text": self.text}
+
+
+def voice_client(said):
+    from agent.voice import VoiceConfirm
+
+    svc, store, ledger, signals, _ = build()
+    run(svc.request("TR-1", None))
+    stt = SaidSTT(said)
+    app = create_app(confirmations=svc, voice_confirm=VoiceConfirm(stt, svc))
+    return TestClient(app), store, ledger, stt
+
+
+def post_voice(client, user="user:jlee", transfer="TR-1"):
+    return client.post(f"/transfers/{transfer}/confirm/voice", data={"user_id": user},
+                       files={"audio": ("c.webm", b"clip")})  # fmt: skip
+
+
+@pytest.mark.parametrize("said", ["Confirm", "confirm.", "  CONFIRM! "])
+def test_saying_confirm_confirms_the_readback(said):
+    client, store, ledger, _ = voice_client(said)
+    r = post_voice(client)
+    assert r.status_code == 200 and r.json()["confirmed"] is True
+    assert ledger.entries[-1]["response"]["method"] == "voice"
+    assert run(store.get_transfer("TR-1"))["readback_confirmed"] is True
+
+
+@pytest.mark.parametrize("said", ["yes", "Don't confirm", "confirm it", "confirmed", "conform"])
+def test_anything_but_confirm_is_denied_and_records_nothing(said):
+    client, store, ledger, _ = voice_client(said)
+    r = post_voice(client)
+    assert r.status_code == 200
+    assert r.json() == {"confirmed": False, "transcript": said, "reason": "not_confirm"}
+    assert ledger.entries == [] and run(store.get_transfer("TR-1"))["readback_confirmed"] is False
+
+
+def test_voice_confirm_rejects_someone_else_before_transcribing():
+    client, _, ledger, stt = voice_client("Confirm")
+    assert post_voice(client, user="user:mokafor").status_code == 403
+    assert stt.calls == 0 and ledger.entries == []
+
+
+def test_voice_confirm_error_statuses():
+    client, *_ = voice_client("")
+    assert post_voice(client).status_code == 422  # silence
+    assert post_voice(client, transfer="TR-404").status_code == 404

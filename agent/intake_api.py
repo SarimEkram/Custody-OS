@@ -13,6 +13,7 @@ from agent.voice import (
     SpokenPrompts,
     TooLarge,
     TTSError,
+    VoiceConfirm,
     VoiceIntake,
     VoiceUnavailable,
     sniff_audio_type,
@@ -56,6 +57,7 @@ def create_app(
     speech: SpokenPrompts | None = None,
     requests=None,
     audio=None,
+    voice_confirm: VoiceConfirm | None = None,
 ) -> FastAPI:
     app = FastAPI(title="agent")
 
@@ -129,6 +131,30 @@ def create_app(
             except NotRequester as e:
                 raise HTTPException(403, "only the person who made the request can confirm") from e
             return {"confirmed": True}
+
+    if voice_confirm:
+
+        @app.post("/transfers/{transfer_id}/confirm/voice")
+        async def confirm_by_voice(
+            transfer_id: str,
+            user_id: Annotated[str, Form(pattern=r"^user:")],
+            audio: Annotated[UploadFile, File()],
+        ) -> dict:
+            try:
+                clip, name = await audio.read(), audio.filename or "confirm.webm"
+                return await voice_confirm.submit(transfer_id, user_id, clip, name)
+            except KeyError as e:
+                raise HTTPException(404, f"unknown transfer {transfer_id}") from e
+            except NoPending as e:
+                raise HTTPException(409, f"no read-back is waiting on {transfer_id}") from e
+            except NotRequester as e:
+                raise HTTPException(403, "only the person who made the request can confirm") from e
+            except TooLarge as e:
+                raise HTTPException(413, str(e)) from e
+            except NoSpeech as e:
+                raise HTTPException(422, str(e)) from e
+            except VoiceUnavailable as e:
+                raise HTTPException(503, "Speech-to-text is down; use the Confirm button.") from e
 
     if speech:
 

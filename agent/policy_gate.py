@@ -377,6 +377,15 @@ _ADVICE = {
     Decision.pending_approval: "Wait. A supervisor approval request is open; you will be resumed when it is decided.",
     Decision.pending_confirmation: "Call request_confirmation with a one-sentence read-back, then wait.",
 }
+# A malformed call is not a policy refusal: the model must fix it (GUARDRAILS_SPEC "told to correct it").
+CORRECTABLE = {"invalid_arguments", "unknown_tool"}
+_FIX = "The call was malformed, not refused by policy. Fix what is named above and call again."
+
+
+def advice(decision: Decision, rule_hits: list[str]) -> str:
+    if decision == Decision.deny and CORRECTABLE & set(rule_hits):
+        return _FIX
+    return _ADVICE[decision]
 
 
 async def execute(tool: str, args: dict[str, Any], reason: str, ctx: RunContext, executor: Executor,
@@ -387,7 +396,7 @@ async def execute(tool: str, args: dict[str, Any], reason: str, ctx: RunContext,
     if d.decision != Decision.allow:
         return ToolResult(status=_STATUS[d.decision], tool=tool, correlation_id=cid, rule_hits=d.rule_hits,
                           approval_id=d.approval_id, decision_id=d.ledger_id,
-                          message=f"{_STATUS[d.decision]} ({', '.join(d.rule_hits)}): {d.reason}. {_ADVICE[d.decision]}")
+                          message=f"{_STATUS[d.decision]} ({', '.join(d.rule_hits)}): {d.reason}. {advice(d.decision, d.rule_hits)}")
 
     t = spec(tool)  # only reached on allow, so the tool is known
     entry_type = EntryType.outcome

@@ -230,6 +230,18 @@ describe('stop request states', () => {
   })
 })
 
+describe('exposure clock', () => {
+  it('runs from checkout until the sample is delivered or checked back in', async () => {
+    const { activeExposure } = await import('../store/custodyStore')
+    const out = scan({ scanned_at: '2026-11-14T18:00:00Z' })
+    const handoff = scan({ type: 'handoff', location_id: 'CORR-1', scanned_at: '2026-11-14T18:01:00Z' })
+    expect(activeExposure('TS-1042', [out, handoff])).toEqual({ checkedOutAt: '2026-11-14T18:00:00Z' })
+    expect(activeExposure('TS-1042', [out, handoff, scan({ type: 'intake', location_id: 'SEQ-3', scanned_at: '2026-11-14T18:03:00Z' })])).toBeNull()
+    expect(activeExposure('TS-1042', [out, scan({ type: 'checkin', scanned_at: '2026-11-14T18:02:00Z' })])).toBeNull()
+    expect(activeExposure('TS-1077', [out])).toBeNull()
+  })
+})
+
 describe('voice fallback behaviour', () => {
   afterEach(() => vi.unstubAllGlobals())
 
