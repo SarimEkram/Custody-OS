@@ -6,7 +6,7 @@ Pure checks (validation, binding, duplicates), the gate's check()/execute() with
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from bson import ObjectId
@@ -20,29 +20,71 @@ from agent.policy_gate import GateState, RunContext, evaluate
 from agent.runner import Runner
 from agent.transfers import MemoryCustodyStore
 
-NOW = datetime(2026, 11, 14, 19, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 14, 19, 0, tzinfo=UTC)
 POLICY = {"policy_id": "custody-default", "version": 3, "rules": {"certification_required": True}}
-RECOVERY = {"policy_id": "recovery", "version": 1, "rules": {"allowed_tools": ["return_to_storage"]}}
+RECOVERY = {
+    "policy_id": "recovery",
+    "version": 1,
+    "rules": {"allowed_tools": ["return_to_storage"]},
+}
 LOCS = {
     "FZ-A": {"_id": "FZ-A", "certifications": ["BSL-2"], "travel_minutes": {"SEQ-3": 6, "FZ-B": 2}},
     "FZ-B": {"_id": "FZ-B", "certifications": ["BSL-2"], "travel_minutes": {"SEQ-3": 4, "FZ-A": 2}},
     "SEQ-3": {"_id": "SEQ-3", "certifications": ["BSL-2"], "travel_minutes": {"FZ-B": 4}},
 }
-GRANT = {"_id": "G", "grantor": "user:jlee", "grantee": "agent:custody-01", "status": "active",
-         "expires_at": NOW + timedelta(hours=4),
-         "scope": {"actions": ["lookup_sample", "reserve_station", "request_courier", "notify",
-                               "checkout_sample", "handoff_to_courier", "deliver"],
-                   "sample_types": ["tissue"], "locations": list(LOCS), "max_restriction": "standard"}}
-SAMPLE = {"_id": "TS-1042", "type": "tissue", "restriction": "standard", "status": "stored",
-          "required_certifications": ["BSL-2"], "max_minutes_out": 20}
-TRANSFER = {"_id": "TR-1", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "state": "reserved",
-            "source": "typed", "reservation_id": "RES-1", "courier_job_id": "CJ-1"}
+GRANT = {
+    "_id": "G",
+    "grantor": "user:jlee",
+    "grantee": "agent:custody-01",
+    "status": "active",
+    "expires_at": NOW + timedelta(hours=4),
+    "scope": {
+        "actions": [
+            "lookup_sample",
+            "reserve_station",
+            "request_courier",
+            "notify",
+            "checkout_sample",
+            "handoff_to_courier",
+            "deliver",
+        ],
+        "sample_types": ["tissue"],
+        "locations": list(LOCS),
+        "max_restriction": "standard",
+    },
+}
+SAMPLE = {
+    "_id": "TS-1042",
+    "type": "tissue",
+    "restriction": "standard",
+    "status": "stored",
+    "required_certifications": ["BSL-2"],
+    "max_minutes_out": 20,
+}
+TRANSFER = {
+    "_id": "TR-1",
+    "sample_id": "TS-1042",
+    "from": "FZ-B",
+    "to": "SEQ-3",
+    "state": "reserved",
+    "source": "typed",
+    "reservation_id": "RES-1",
+    "courier_job_id": "CJ-1",
+}
 
 
 def state(**kw):
-    s = dict(now=NOW, actor="agent:custody-01", on_behalf_of="user:jlee", transfer=dict(TRANSFER),
-             grant=GRANT, sample=SAMPLE, locations=LOCS, policy=POLICY,
-             requester={"_id": "user:jlee", "clearances": ["standard"]})
+    s = dict(
+        now=NOW,
+        actor="agent:custody-01",
+        on_behalf_of="user:jlee",
+        transfer=dict(TRANSFER),
+        grant=GRANT,
+        sample=SAMPLE,
+        locations=LOCS,
+        policy=POLICY,
+        requester={"_id": "user:jlee", "clearances": ["standard"]},
+    )
     s.update(kw)
     return GateState(**s)
 
@@ -59,13 +101,16 @@ def test_a_valid_call_passes_and_the_optional_window_may_be_left_out():
     assert ok is None
 
 
-@pytest.mark.parametrize("tool, args, field", [
-    ("checkout_sample", {}, "sample_id"),                                  # missing
-    ("checkout_sample", {"sample_id": "TS-1042", "admin": "yes"}, "admin"),  # unknown key
-    ("checkout_sample", {"sample_id": 1042}, "sample_id"),                 # wrong type
-    ("checkout_sample", {"sample_id": "TS-1042; DROP"}, "sample_id"),      # not id-like
-    ("notify", {"user_id": "user:jlee", "message": "x" * 5000}, "message"),  # oversized
-])
+@pytest.mark.parametrize(
+    "tool, args, field",
+    [
+        ("checkout_sample", {}, "sample_id"),  # missing
+        ("checkout_sample", {"sample_id": "TS-1042", "admin": "yes"}, "admin"),  # unknown key
+        ("checkout_sample", {"sample_id": 1042}, "sample_id"),  # wrong type
+        ("checkout_sample", {"sample_id": "TS-1042; DROP"}, "sample_id"),  # not id-like
+        ("notify", {"user_id": "user:jlee", "message": "x" * 5000}, "message"),  # oversized
+    ],
+)
 def test_malformed_arguments_are_refused_and_the_message_names_the_field(tool, args, field):
     r = guardrails.validate_call(tool, args)
     assert r and r.rule == "invalid_arguments" and field in r.detail
@@ -82,25 +127,31 @@ def test_limits_come_from_the_environment_with_safe_defaults():
 
 
 # ------------------------------------------------------------ guardrail 2: binding
-@pytest.mark.parametrize("tool, args", [
-    ("checkout_sample", {"sample_id": "EV-2201"}),
-    ("lookup_sample", {"sample_id": "EV-2201"}),
-    ("request_courier", {"from": "FZ-B", "to": "FZ-A"}),
-    ("request_courier", {"from": "FZ-A", "to": "SEQ-3"}),
-    ("reserve_station", {"station_id": "FZ-A"}),
-    ("handoff_to_courier", {"transfer_id": "TR-9"}),
-])
+@pytest.mark.parametrize(
+    "tool, args",
+    [
+        ("checkout_sample", {"sample_id": "EV-2201"}),
+        ("lookup_sample", {"sample_id": "EV-2201"}),
+        ("request_courier", {"from": "FZ-B", "to": "FZ-A"}),
+        ("request_courier", {"from": "FZ-A", "to": "SEQ-3"}),
+        ("reserve_station", {"station_id": "FZ-A"}),
+        ("handoff_to_courier", {"transfer_id": "TR-9"}),
+    ],
+)
 def test_a_call_that_contradicts_the_confirmed_transfer_is_denied(tool, args):
     e = evaluate(tool, args, state())
     assert e.decision == "deny" and e.rule_hits == ["args_not_bound_to_transfer"]
 
 
-@pytest.mark.parametrize("tool, args", [
-    ("checkout_sample", {"sample_id": "TS-1042"}),
-    ("request_courier", {"from": "FZ-B", "to": "SEQ-3"}),
-    ("reserve_station", {"station_id": "SEQ-3"}),
-    ("lookup_sample", {}),                                  # omitted: filled from the transfer
-])
+@pytest.mark.parametrize(
+    "tool, args",
+    [
+        ("checkout_sample", {"sample_id": "TS-1042"}),
+        ("request_courier", {"from": "FZ-B", "to": "SEQ-3"}),
+        ("reserve_station", {"station_id": "SEQ-3"}),
+        ("lookup_sample", {}),  # omitted: filled from the transfer
+    ],
+)
 def test_matching_arguments_are_not_bound_violations(tool, args):
     assert evaluate(tool, args, state()).rule_hits != ["args_not_bound_to_transfer"]
 
@@ -134,7 +185,9 @@ def test_a_reversible_step_may_repeat_and_a_failed_irreversible_one_may_retry():
 
 # ------------------------------------------------------------ regression guards (guardrail 7)
 def test_recovery_tools_are_refused_in_a_normal_run_and_others_in_a_recovery_run():
-    assert evaluate("cancel_reservation", {}, state()).rule_hits == ["recovery_tool_outside_recovery"]
+    assert evaluate("cancel_reservation", {}, state()).rule_hits == [
+        "recovery_tool_outside_recovery"
+    ]
     s = state(mode="recovery", recovery_policy=RECOVERY)
     denied = evaluate("checkout_sample", {"sample_id": "TS-1042"}, s)
     assert denied.rule_hits == ["not_in_recovery_allowlist"]
@@ -159,14 +212,24 @@ class FakeDB:
 
 def fake_db(requester="user:jlee", clearances=("standard", "controlled", "forensic")):
     return FakeDB(
-        approvals=Coll({"_id": "APR-1", "status": "pending", "transfer_id": "TR-1",
-                        "sample_id": "EV-2201", "approver_role": "supervisor",
-                        "requested_for_tool": "checkout_sample"}),
-        identities=Coll({"_id": "user:mokafor", "role": "supervisor", "clearances": list(clearances)},
-                        {"_id": "user:jlee", "role": "lab_tech", "clearances": ["standard"]}),
+        approvals=Coll(
+            {
+                "_id": "APR-1",
+                "status": "pending",
+                "transfer_id": "TR-1",
+                "sample_id": "EV-2201",
+                "approver_role": "supervisor",
+                "requested_for_tool": "checkout_sample",
+            }
+        ),
+        identities=Coll(
+            {"_id": "user:mokafor", "role": "supervisor", "clearances": list(clearances)},
+            {"_id": "user:jlee", "role": "lab_tech", "clearances": ["standard"]},
+        ),
         samples=Coll({"_id": "EV-2201", "restriction": "forensic"}),
-        transfers=Coll({"_id": "TR-1", "requested_by": requester, "sample_id": "EV-2201",
-                        "grant_id": "G"}),
+        transfers=Coll(
+            {"_id": "TR-1", "requested_by": requester, "sample_id": "EV-2201", "grant_id": "G"}
+        ),
     )
 
 
@@ -281,8 +344,11 @@ def test_if_the_decision_cannot_be_written_the_lab_is_never_called(gate, monkeyp
 
 # ------------------------------------------------------------ loop budgets (guardrails 3 and 4)
 def tc(n, name, **args):
-    return {"id": f"call_{n}", "type": "function",
-            "function": {"name": name, "arguments": json.dumps({"reason": "r", **args})}}
+    return {
+        "id": f"call_{n}",
+        "type": "function",
+        "function": {"name": name, "arguments": json.dumps({"reason": "r", **args})},
+    }
 
 
 def say(*calls, content=None):
@@ -379,9 +445,17 @@ class Loop:
 
 
 def _transfer(state="requested"):
-    return {"_id": "TR-1", "sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3",
-            "requested_by": "user:jlee", "grant_id": "G", "request_id": "VR-1",
-            "state": state, "history": []}
+    return {
+        "_id": "TR-1",
+        "sample_id": "TS-1042",
+        "from": "FZ-B",
+        "to": "SEQ-3",
+        "requested_by": "user:jlee",
+        "grant_id": "G",
+        "request_id": "VR-1",
+        "state": state,
+        "history": [],
+    }
 
 
 def test_the_transcript_is_fenced_and_cannot_close_its_own_fence():
@@ -414,7 +488,9 @@ def test_an_aborted_run_goes_to_the_recovery_planner(status):
 
 # ------------------------------------------------------------ the ledger row for an aborted run
 def test_an_aborted_run_is_written_as_a_violation_row_the_ledger_validator_accepts():
-    ctx = LoopContext("agent:custody-01", "user:jlee", "G", "TR-1", "VR-1", refs={"sample_id": "TS-1042"})
+    ctx = LoopContext(
+        "agent:custody-01", "user:jlee", "G", "TR-1", "VR-1", refs={"sample_id": "TS-1042"}
+    )
     row = guardrails.abort_entry(ctx, "budget", "lookup_sample was called more than 3 times")
     required = json.load(open("db/validators/ledger.json"))["$jsonSchema"]["required"]
     assert all(k in row for k in required)

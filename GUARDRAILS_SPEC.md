@@ -1,6 +1,6 @@
 # Spec: agent guardrails
 
-Status: ready for an agent to pick up. Not yet published to an issue tracker (none is configured for this repo); this file is the source of truth until it is.
+Status: implemented on branch `feature/agent-guardrails` (see "Implementation notes" at the end). Originally written as ready for an agent to pick up. Not yet published to an issue tracker (none is configured for this repo); this file is the source of truth until it is.
 Findings below come from reading the code on `main` (`b4e1cda`). Nothing was run. Each "Current state" item should be confirmed with a failing test before it is fixed.
 
 ## Problem Statement
@@ -108,7 +108,7 @@ From the user's side:
 
 **Guardrail 5: idempotency of irreversible steps (gate).**
 - Before an irreversible tool is allowed, the gate checks the transfer's ledger history. If a prior call to the same tool succeeded or is awaiting its scan, the new call is refused with a rule such as `duplicate_irreversible_step`.
-- A retry after `unconfirmed` is allowed only if it reuses the original correlation. A fresh correlation for the same step is refused.
+- Implemented as: any earlier `sent` outcome for the same irreversible tool on the transfer refuses the call. A failed call (no `sent` outcome) may be retried. A step left `unconfirmed` is not retried by the model; it escalates to recovery. (The original idea of retrying with the same correlation is not possible: the gate mints a fresh correlation per call.)
 - Write order stays the same: decision first, outcome after.
 
 **Guardrail 6: prompt-injection hygiene (loop and prompt).**
@@ -192,3 +192,11 @@ Assertions: tool results the model sees, ledger rows (including `rule_hits`), la
 - Which ledger entry type records budget exhaustion without changing the validator?
 - Should "model unavailable" before any irreversible step cancel the transfer, or leave it requested so the tech can retry? This spec chooses cancel for safety; the other is reasonable.
 - Exact default limits (field lengths, call caps) once a normal run's call counts are measured.
+
+## Implementation notes (branch `feature/agent-guardrails`)
+
+- Done: guardrails 1 to 5 and 7 and the hygiene half of 6; 44 new unit tests, whole unit suite passes (326), ruff clean on the changed files. Atlas integration tests were not run.
+- Rule names written to the ledger: `unknown_tool`, `invalid_arguments`, `args_not_bound_to_transfer`, `duplicate_irreversible_step`, `gate_unavailable`. Abnormal run endings are written as `violation` rows (actor `system:guardrail`, policy id `guardrails`, `rule_hits` = `budget` | `llm_error` | `error` | `max_steps`), using existing entry types, so no validator change.
+- Seam deviation: the gate behaviours are tested at the gate's `execute()` with injected fakes (no database), not through the agent loop, because the loop tests use a stub gate. The loop behaviours are tested at the loop.
+- Still to do: Person C needs plain-language explanations for the new rule names (and for the four run-ending statuses) in the dashboard's rule table. Not run against Atlas or a live model yet.
+- Known gaps: `max_steps` aborts now request recovery (previously nothing happened); `parse_request` is not bound to the transfer; the demo adversarial beat is not built.

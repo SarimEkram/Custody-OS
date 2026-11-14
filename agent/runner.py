@@ -21,6 +21,10 @@ class Outcome:
     recovery: RecoveryResult | None = None
 
 
+# runs that ended abnormally (budget, model outage, crash): they ask for recovery like a halt does
+ABORTED = ("max_steps", "budget", "llm_error", "error")
+
+
 class Runner:
     def __init__(
         self,
@@ -43,8 +47,9 @@ class Runner:
         ctx = RunContext(self.agent_id, t["requested_by"], t["grant_id"], transfer_id,
                          t["request_id"], refs=refs)  # fmt: skip
         said = (await self.requests.get(t["request_id"]))["transcript"]
+        said = said.replace("<untrusted>", "").replace("</untrusted>", "")  # cannot close its fence
         text = (
-            f'The tech said: "{said}"\n'
+            f'The tech said: <untrusted>"{said}"</untrusted>\n'
             f"Validated: move {t['sample_id']} from {t['from']} to {t['to']}"
             + (f", window {t['window']}" if t.get("window") else "")
             + "."
@@ -60,7 +65,7 @@ class Runner:
         finally:
             self.loop_tasks.pop(transfer_id, None)
         recover = result.status == "halted" or (
-            result.status in ("denied", "timeout") and result.needs_recovery
+            result.status in ("denied", "timeout", *ABORTED) and result.needs_recovery
         )
         if not recover:
             return Outcome(result)

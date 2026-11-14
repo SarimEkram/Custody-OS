@@ -91,3 +91,28 @@ def bound_mismatches(tool: str, args: dict, transfer: dict | None) -> list[str]:
         for arg, field in BOUND_TO_TRANSFER.items()
         if arg in args and transfer.get(field) is not None and args[arg] != transfer[field]
     )
+
+
+def abort_entry(ctx, status: str, detail: str) -> dict:
+    """The ledger row for a run that ended abnormally (budget, model outage, crash), so an auditor
+    can tell "the agent broke or ran out of budget" from "the gate said no"."""
+    import uuid
+    from datetime import UTC, datetime  # local: keeps the module's top-level imports pure
+
+    return {
+        "timestamp": datetime.now(UTC),
+        "entry_type": "violation",
+        "actor": "system:guardrail",
+        "on_behalf_of": ctx.on_behalf_of,
+        "grant_id": ctx.grant_id,
+        "policy_id": "guardrails",
+        "policy_version": 1,
+        "decision": "halt",
+        "transfer_id": ctx.transfer_id,
+        "sample_id": ctx.refs.get("sample_id"),
+        "request_id": ctx.request_id,
+        "correlation_id": f"c-{uuid.uuid4().hex[:8]}",
+        "rule_hits": [status],
+        "reason": detail[:500],
+        "summary": f"The run for {ctx.transfer_id} ended early ({status}): {detail[:200]}",
+    }

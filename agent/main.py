@@ -20,6 +20,7 @@ import httpx
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import StreamingResponse
 
+from agent import guardrails
 from agent.atlas import AtlasExecutor, ScanApplier
 from agent.confirmation import ConfirmationService, make_request_confirmation_handler
 from agent.events import CourierTicker, EventHub, merged_stream
@@ -111,9 +112,13 @@ def build_service(b: Backends) -> Service:
         b.lab, internal, applier.bus, execute=b.execute, get_transfer=b.store.get_transfer,
         record_unverified=b.record_unverified, next_state=b.next_state, timeout=b.verify_timeout,
     )  # fmt: skip
+    async def record_abort(ctx, status: str, detail: str) -> None:
+        await b.append(guardrails.abort_entry(ctx, status, detail))
+
     loop = AgentLoop(
         b.llm, executor, b.store, signals=signals, confirmations=confirmations,
         wait_timeout=b.wait_timeout, manage_blocking=False,  # A's gate blocks and unblocks
+        on_abort=record_abort,
     )  # fmt: skip
     planner = RecoveryPlanner(
         executor, b.store, b.append, b.read_outcomes, b.job_state, b.freezer_certs,
