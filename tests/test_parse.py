@@ -11,7 +11,7 @@ GOOD = {"sample_id": "TS-1042", "from": "FZ-B", "to": "SEQ-3", "window": "2 PM"}
 
 
 def words(**logprobs):
-    """A transcript of 'Move TS-1042 from Freezer B to Sequencing Station 3' with chosen logprobs."""
+    """Words of 'Move TS-1042 from Freezer B to Sequencing Station 3', chosen logprobs."""
     text = ["Move", "TS-1042", "from", "Freezer", "B", "to", "Sequencing", "Station", "3"]
     return [{"text": t, "type": "word", "logprob": logprobs.get(t, -0.05)} for t in text]
 
