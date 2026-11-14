@@ -8,7 +8,10 @@ checked_out / in_transit / received / recovered.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timezone
+
+from pymongo.errors import OperationFailure
 
 from agent import ledger
 from agent.config import settings
@@ -60,18 +63,67 @@ async def record_unverified(transfer: dict, scan: dict | None, status: OutcomeSt
                          "summary": f"Verification {status} for {transfer['_id']} ({scan['sample_id']}): {detail}"})
 
 
+async def _handled_state(scan: dict) -> str | None:
+    """The transfer's state if this scan was already verified or flagged by anyone, else None."""
+    db = agent_db()
+    handled = await db.ledger.find_one({"entry_type": {"$in": ["verification", "violation"]},
+                                        "response.scan_id": str(scan["_id"])}, projection={"transfer_id": 1})
+    if not handled:
+        return None
+    done = await db.transfers.find_one({"_id": handled["transfer_id"]}, projection={"state": 1})
+    return done["state"] if done else "unknown"
+
+
 async def apply_verified_scan(scan: dict, expected_location: str | None = None) -> str:
+    """Apply a scan exactly once, even when several agent services watch the same database.
+
+    Idempotent: a scan already verified (or flagged) by anyone is never processed twice, which covers change-
+    stream replays after a reconnect and seeded history. If another verifier wins the race (a write conflict or
+    a state conflict), we re-check and return what it recorded instead of failing.
+    """
+    last: Exception | None = None
+    for attempt in range(4):
+        done = await _handled_state(scan)
+        if done is not None:
+            return done
+        try:
+            return await _apply_once(scan, expected_location)
+        except (StateConflict, OperationFailure) as e:
+            if isinstance(e, OperationFailure) and "TransientTransactionError" not in (e.details or {}).get(
+                    "errorLabels", []):
+                raise
+            last = e
+            await asyncio.sleep(0.25 * (attempt + 1))
+    done = await _handled_state(scan)
+    if done is not None:
+        return done
+    raise last  # type: ignore[misc]
+
+
+async def _apply_once(scan: dict, expected_location: str | None = None) -> str:
     """Match a scan to its transfer and advance state inside one transaction. Returns the new state.
 
     Raises StateConflict if the transfer moved underneath us. Writes a violation entry on mismatch.
     """
     db = agent_db()
     cid = scan.get("correlation_id")
-    outcome = await db.ledger.find_one({"correlation_id": cid, "entry_type": {"$in": ["outcome", "recovery"]}}) \
-        if cid else None
-    transfer = await db.transfers.find_one({"_id": outcome["transfer_id"]}) if outcome else \
-        await db.transfers.find_one({"sample_id": scan["sample_id"],
-                                     "state": {"$nin": ["received", "recovered", "cancelled"]}})
+    outcome = None
+    if cid:
+        # The lab emits the scan while the call is still running, so the outcome row can land a moment AFTER the
+        # scan. Wait for it. A scan that names a correlation id is matched to THAT call only: falling back to
+        # "any active transfer for this sample" once let a stray scan advance someone else's transfer.
+        for _ in range(10):
+            outcome = await db.ledger.find_one({"correlation_id": cid,
+                                                "entry_type": {"$in": ["outcome", "recovery"]}})
+            if outcome:
+                break
+            await asyncio.sleep(0.3)
+        if outcome is None:
+            raise LookupError(f"scan {scan.get('_id')} names correlation id {cid!r} but no such call was recorded")
+        transfer = await db.transfers.find_one({"_id": outcome["transfer_id"]})
+    else:  # a scan with no correlation id (manual scripts/scan.py): match the sample's single active transfer
+        transfer = await db.transfers.find_one({"sample_id": scan["sample_id"],
+                                                "state": {"$nin": ["received", "recovered", "cancelled"]}})
     if transfer is None:
         raise LookupError(f"no active transfer for scan {scan.get('_id')} ({scan['sample_id']})")
 

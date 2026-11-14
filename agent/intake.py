@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from agent.llm import LLMError
 from agent.parse import Catalog, validate_parse
 from agent.tool_catalogue import openai_tools
 from agent.transfers import MemoryCustodyStore, next_id
@@ -49,6 +50,10 @@ Parser = Callable[[str], Awaitable[dict]]
 def llm_parser(llm, catalog: Catalog) -> Parser:
     """One model call that must answer with a parse_request tool call."""
     tool = [t for t in openai_tools() if t["function"]["name"] == "parse_request"]
+    # The prompt says "leave a field out if it was not said", so the schema must allow that. With every
+    # field required, Groq rejected the model's call (HTTP 400) whenever the tech left out the time or
+    # the source, which surfaced as a 500. The code validates what is missing (validate_parse).
+    tool[0]["function"]["parameters"]["required"] = []
     places = "; ".join(f"{i} = {name}" for i, name in catalog.locations.items())
     system = (
         "Turn the lab tech's request into a parse_request call. Use location ids, not names. "
@@ -56,9 +61,14 @@ def llm_parser(llm, catalog: Catalog) -> Parser:
     )
 
     async def parse(text: str) -> dict:
-        msg = await llm.chat(
-            [{"role": "system", "content": system}, {"role": "user", "content": text}], tool
-        )
+        try:
+            msg = await llm.chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": text}], tool
+            )
+        except LLMError as e:
+            if "validation failed" in str(e):  # the model's call broke the schema: ask the tech again
+                raise ParseFailed("the model's parse_request call was rejected") from e
+            raise
         calls = msg.get("tool_calls")
         if not calls:
             raise ParseFailed("model made no parse_request call")
@@ -66,7 +76,12 @@ def llm_parser(llm, catalog: Catalog) -> Parser:
             args = json.loads(calls[0]["function"]["arguments"])
         except ValueError as e:
             raise ParseFailed("unreadable parse_request arguments") from e
-        return {k: v for k, v in args.items() if k != "reason"}
+        args = {k: v for k, v in args.items() if k != "reason"}
+        # "Move EV-2201 to the Forensics Lab": the tech did not say where it is, but the database knows.
+        # This is a stored fact, not a guess, and the read-back shows the plan before anything irreversible.
+        if not args.get("from") and args.get("sample_id") in catalog.samples:
+            args["from"] = catalog.samples[args["sample_id"]]
+        return args
 
     return parse
 
