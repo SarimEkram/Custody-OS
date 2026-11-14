@@ -111,6 +111,29 @@ export const toolLabel = (tool: string | null | undefined): string => {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+/**
+ * Display-only: swaps raw tool names in a ledger sentence for their readable label, so
+ * "Agent checkout_sample TS-1042 for jlee ..." reads "Check out sample TS-1042 for jlee ...".
+ * The ledger itself is never changed; this only affects what is shown.
+ * Names with an underscore are unambiguous and replaced everywhere. One-word tool names
+ * (notify, deliver) are ordinary English, so they are only replaced where the gate puts a tool name.
+ */
+const TOOL_NAMES = Object.keys(TOOL_TITLES)
+const SNAKE = new RegExp(`\\b(${TOOL_NAMES.filter((n) => n.includes('_')).join('|')})\\b`, 'g')
+const ONE_WORD = TOOL_NAMES.filter((n) => !n.includes('_')).join('|')
+const AFTER_AGENT = new RegExp(`^Agent (${TOOL_NAMES.join('|')})\\b`)
+const AFTER_VERB = new RegExp(`\\b(accepted|approved|denied|asked for) (${ONE_WORD})\\b`, 'g')
+const BEFORE_FAILED = new RegExp(`\\b(${ONE_WORD}) call failed`, 'g')
+
+export const humanizeText = (text: string | null | undefined): string => {
+  if (!text) return ''
+  return text
+    .replace(AFTER_AGENT, (_m, t: string) => TOOL_TITLES[t])
+    .replace(AFTER_VERB, (_m, v: string, t: string) => `${v} ‘${TOOL_TITLES[t]}’`)
+    .replace(BEFORE_FAILED, (_m, t: string) => `‘${TOOL_TITLES[t]}’ call failed`)
+    .replace(SNAKE, (t: string) => `‘${TOOL_TITLES[t]}’`)
+}
+
 // ---------- exposure countdown ----------
 
 export type ExposureLevel = 'safe' | 'approaching' | 'exceeded'

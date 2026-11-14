@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ClipboardCheck, FileAudio, Gavel, OctagonX, RotateCcw, ScanLine, ShieldCheck, Undo2, type LucideIcon } from 'lucide-react'
 import { useMemo } from 'react'
-import { decisionView, formatTime, toolLabel } from '../../lib/format'
+import { decisionView, formatTime, humanizeText, toolLabel } from '../../lib/format'
 import type { LedgerEntry, ScanEvent, VoiceRequestDoc } from '../../lib/types'
 import { Badge, Mono, toneText } from '../ui/Badge'
 import type { Tone } from '../../lib/format'
@@ -34,7 +34,7 @@ export function buildTimeline(entries: LedgerEntry[], scans: ScanEvent[], reques
 
   for (const e of entries) {
     const d = decisionView(e.decision)
-    const base = { id: e._id, at: e.timestamp, entry: e, detail: e.summary }
+    const base = { id: e._id, at: e.timestamp, entry: e, detail: humanizeText(e.summary) }
     switch (e.entry_type) {
       case 'intake':
         // Covered by the original-request row when the request doc is present.
@@ -66,10 +66,10 @@ export function buildTimeline(entries: LedgerEntry[], scans: ScanEvent[], reques
         items.push({ ...base, icon: Gavel, tone: e.response?.exceeded ? 'bad' : 'ok', stage: 'Final exposure', title: `${String(e.response?.minutes_out ?? '?')} min out · ${e.response?.exceeded ? 'limit exceeded' : 'within limit'}` })
         break
       case 'violation':
-        items.push({ ...base, icon: AlertTriangle, tone: 'bad', stage: 'Violation', title: e.summary ?? 'Violation recorded' })
+        items.push({ ...base, icon: AlertTriangle, tone: 'bad', stage: 'Violation', title: humanizeText(e.summary) || 'Violation recorded' })
         break
       default:
-        items.push({ ...base, icon: ShieldCheck, tone: 'mute', stage: e.entry_type, title: e.summary ?? e.entry_type })
+        items.push({ ...base, icon: ShieldCheck, tone: 'mute', stage: e.entry_type, title: humanizeText(e.summary) || e.entry_type })
     }
   }
 

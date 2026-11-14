@@ -1,5 +1,6 @@
 import { CheckCircle2, Hourglass, RotateCcw, Undo2 } from 'lucide-react'
 import { denialFor } from '../../lib/authority'
+import { humanizeText, toolLabel } from '../../lib/format'
 import { pickActiveTransfer, useCustodyStore } from '../../store/custodyStore'
 
 /**
@@ -33,7 +34,7 @@ export function WorkflowStatus() {
           <ul className="mt-2 space-y-1.5 text-[13px]">
             {compensations.length === 0 && <li className="text-muted">Nothing yet</li>}
             {compensations.map((e) => (
-              <li key={e._id} className="flex gap-2"><CheckCircle2 size={14} className="mt-0.5 shrink-0 text-ok" aria-hidden />{e.summary ?? e.tool}</li>
+              <li key={e._id} className="flex gap-2"><CheckCircle2 size={14} className="mt-0.5 shrink-0 text-ok" aria-hidden />{humanizeText(e.summary) || toolLabel(e.tool)}</li>
             ))}
           </ul>
         </div>
@@ -44,7 +45,7 @@ export function WorkflowStatus() {
             <ul className="mt-2 space-y-1.5 text-[13px]">
               {recovery.length === 0 && <li className="text-muted">Not started</li>}
               {recovery.map((e) => (
-                <li key={e._id} className="flex gap-2"><RotateCcw size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden />{e.summary ?? e.tool}</li>
+                <li key={e._id} className="flex gap-2"><RotateCcw size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden />{humanizeText(e.summary) || toolLabel(e.tool)}</li>
               ))}
               <li className="flex gap-2">
                 {checkedIn ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-ok" aria-hidden /> : <Hourglass size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden />}
