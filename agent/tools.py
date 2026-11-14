@@ -1,145 +1,62 @@
-"""Tool catalogue (docs/ARCHITECTURE.md "Tool catalogue").
+"""Tool catalogue (shared contract between the gate and B's tool executor).
 
-Every tool carries what CLAUDE.md requires: a reversible tag (None = read-only or a
-recovery action), its compensation or recovery step, and the scan it should produce.
-Compensations and recovery actions also go through execute() (recovery policy) but are
-hidden from the LLM: only the recovery planner calls them.
+Every tool the agent can call is listed here with its reversibility, compensation/recovery,
+expected scan and which grant/policy rules apply. When you add a tool, add it here first
+(CLAUDE.md: gate rules + reversible tag + compensation + expected scan).
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+Reversibility = Literal["read_only", "reversible", "irreversible", "recovery"]
 
 
 @dataclass(frozen=True)
-class Tool:
+class ToolSpec:
     name: str
-    description: str
-    system: str  # freezer | scheduler | courier | station | internal
-    params: dict[str, str] = field(default_factory=dict)
-    reversible: bool | None = None
-    compensation: str | None = None
-    recovery: str | None = None
-    expected_scan: str | None = None
-    llm: bool = True
+    system: Literal["internal", "freezer", "scheduler", "courier", "station"]
+    reversibility: Reversibility
+    compensation: str | None = None  # tool that undoes it (reversible) or recovery step (irreversible)
+    expected_scan: str | None = None  # custody_events.type the verifier waits for
+    needs_scope: bool = True  # must appear in grant.scope.actions
+    moves_toward_destination: bool = False  # destination certification applies
+
+    @property
+    def reversible(self) -> bool | None:
+        """Value stored in ledger.reversible (None for read-only)."""
+        return {"read_only": None, "reversible": True, "irreversible": False, "recovery": True}[self.reversibility]
+
+    @property
+    def irreversible(self) -> bool:
+        return self.reversibility == "irreversible"
 
 
-_TOOLS = [
-    Tool(
-        "parse_request",
-        "Record the sample and route understood from the request.",
-        "internal",
-        {
-            "sample_id": "Sample ID",
-            "from": "Source location id",
-            "to": "Destination location id",
-            "window": "Requested time window",
-        },
-    ),
-    Tool(
-        "request_confirmation",
-        "Read the plan back to the tech and wait for confirmation.",
-        "internal",
-        {"summary": "Plain-English plan to read back"},
-    ),
-    Tool("lookup_sample", "Find where a sample is stored.", "freezer", {"sample_id": "Sample ID"}),
-    Tool(
-        "reserve_station",
-        "Reserve the destination station.",
-        "scheduler",
-        {"station_id": "Station location id", "window": "Time window"},
-        reversible=True,
-        compensation="cancel_reservation",
-    ),
-    Tool(
-        "request_courier",
-        "Book a courier from the source to the destination.",
-        "courier",
-        {"from": "Source location id", "to": "Destination location id", "window": "Time window"},
-        reversible=True,
-        compensation="cancel_courier_job",
-    ),
-    Tool(
-        "notify",
-        "Send a message to a person.",
-        "internal",
-        {"user_id": "Recipient id", "message": "Message text"},
-        reversible=True,
-        compensation="notify",
-    ),  # compensation is a retraction notice
-    Tool(
-        "checkout_sample",
-        "Take the sample out of its freezer. Cannot be undone.",
-        "freezer",
-        {"sample_id": "Sample ID"},
-        reversible=False,
-        expected_scan="checkout",
-        recovery="return_to_storage: nearest certified freezer before the clock runs out",
-    ),
-    Tool(
-        "handoff_to_courier",
-        "Hand the sample to the courier. Cannot be undone.",
-        "courier",
-        {"transfer_id": "Transfer id"},
-        reversible=False,
-        expected_scan="handoff",
-        recovery="reroute the courier to the nearest certified freezer",
-    ),
-    Tool(
-        "deliver",
-        "Deliver the sample to the destination station. Cannot be undone.",
-        "station",
-        {"transfer_id": "Transfer id"},
-        reversible=False,
-        expected_scan="intake",
-        recovery="reroute the courier to the nearest certified freezer",
-    ),
-    # Compensations and recovery actions: run by the recovery planner, never offered to the LLM.
-    Tool(
-        "cancel_reservation",
-        "Cancel a station reservation.",
-        "scheduler",
-        {"reservation_id": "Reservation id"},
-        llm=False,
-    ),
-    Tool(
-        "cancel_courier_job",
-        "Cancel a courier job that has not been picked up.",
-        "courier",
-        {"job_id": "Courier job id"},
-        llm=False,
-    ),
-    Tool(
-        "return_to_storage",
-        "Send a sample back to a freezer.",
-        "courier",
-        {"sample_id": "Sample ID", "freezer_id": "Freezer location id"},
-        expected_scan="checkin",
-        llm=False,
-    ),
-]
-
-TOOLS: dict[str, Tool] = {t.name: t for t in _TOOLS}
+TOOLS: dict[str, ToolSpec] = {t.name: t for t in [
+    ToolSpec("parse_request", "internal", "read_only", needs_scope=False),
+    ToolSpec("request_confirmation", "internal", "read_only", needs_scope=False),
+    ToolSpec("lookup_sample", "freezer", "read_only"),
+    ToolSpec("reserve_station", "scheduler", "reversible", compensation="cancel_reservation",
+             moves_toward_destination=True),
+    ToolSpec("request_courier", "courier", "reversible", compensation="cancel_courier_job",
+             moves_toward_destination=True),
+    ToolSpec("notify", "internal", "reversible", compensation="notify"),  # retraction notice
+    ToolSpec("checkout_sample", "freezer", "irreversible", compensation="return_to_storage",
+             expected_scan="checkout", moves_toward_destination=True),
+    ToolSpec("handoff_to_courier", "courier", "irreversible", compensation="return_to_storage",
+             expected_scan="handoff", moves_toward_destination=True),
+    ToolSpec("deliver", "station", "irreversible", compensation="return_to_storage",
+             expected_scan="intake", moves_toward_destination=True),
+    # recovery-only tools: allowed under the recovery policy even without a valid grant
+    ToolSpec("cancel_reservation", "scheduler", "recovery", needs_scope=False),
+    ToolSpec("cancel_courier_job", "courier", "recovery", needs_scope=False),
+    ToolSpec("return_to_storage", "courier", "recovery", expected_scan="checkin", needs_scope=False),
+]}
 
 
-def irreversible_tools() -> set[str]:
-    return {t.name for t in _TOOLS if t.reversible is False}
-
-
-def openai_tools() -> list[dict]:
-    """LLM-visible tools in OpenAI function format; `reason` is always required."""
-    out = []
-    for t in _TOOLS:
-        if not t.llm:
-            continue
-        props = {k: {"type": "string", "description": v} for k, v in t.params.items()}
-        props["reason"] = {"type": "string", "description": "Why this call is being made"}
-        out.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": {"type": "object", "properties": props, "required": list(props)},
-                },
-            }
-        )
-    return out
+def spec(tool: str) -> ToolSpec:
+    try:
+        return TOOLS[tool]
+    except KeyError:
+        raise ValueError(f"unknown tool {tool!r}; add it to agent/tools.py first") from None

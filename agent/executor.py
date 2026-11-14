@@ -14,7 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from agent.lab import LabClient, LabError
-from agent.tools import TOOLS
+from agent.tool_catalogue import TOOLS
 
 STATUS_FOR_DECISION = {
     "deny": "DENIED",

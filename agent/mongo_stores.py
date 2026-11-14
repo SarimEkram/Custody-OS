@@ -9,7 +9,6 @@ smoke script can point it elsewhere.
 import hashlib
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
 
 from gridfs.asynchronous import AsyncGridFSBucket
 
@@ -174,16 +173,6 @@ async def load_courier_travel(db) -> dict[tuple[str, str], float]:
             if (other, loc["_id"]) not in travel:
                 travel[(loc["_id"], other)] = minutes
     return travel
-
-
-class MongoEventStore:
-    """The scanner's store: the only writer of custody_events (scanner_svc user)."""
-
-    def __init__(self, db) -> None:
-        self.db = db
-
-    async def insert(self, event: dict) -> Any:
-        return await self.db.custody_events.insert_one(event)
 
 
 async def start_scan_feed(db, bus) -> None:

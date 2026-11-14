@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, ".")
 from agent.llm import ChatLLM, LLMError  # noqa: E402
-from agent.tools import openai_tools  # noqa: E402
+from agent.tool_catalogue import openai_tools  # noqa: E402
 from scripts._env import load_env  # noqa: E402
 
 

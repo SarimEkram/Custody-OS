@@ -1,0 +1,13 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": ["sample_id", "from", "to", "requested_by", "grant_id", "state"],
+    "properties": {
+      "state": { "enum": ["requested", "reserved", "checked_out", "in_transit", "received", "blocked", "revoked",
+                          "recovering", "recovered", "cancelled"] },
+      "blocked_reason": { "enum": ["approval_pending", "readback_pending", null] },
+      "requested_by": { "bsonType": "string", "pattern": "^user:" },
+      "halt": { "bsonType": "bool" }
+    }
+  }
+}

@@ -1,5 +1,14 @@
 line-length = 100
-extend-exclude = ["*.md"]
+# Person A's files keep A's style (and A's reformatting is theirs to do); never format them from here.
+extend-exclude = [
+    "*.md", "db",
+    "agent/api.py", "agent/audit.py", "agent/config.py", "agent/control.py", "agent/custody.py",
+    "agent/embeddings.py", "agent/ledger.py", "agent/models.py", "agent/policy_gate.py",
+    "agent/signing.py", "agent/tools.py", "agent/watchers.py",
+    "scripts/revoke_grant.py", "scripts/stop.py", "scripts/embed_smoke.py",
+    "tests/test_gate_integration.py", "tests/test_gate_rules.py", "tests/test_api_integration.py",
+    "tests/test_ledger_append_only.py", "tests/test_watchers_integration.py",
+]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]

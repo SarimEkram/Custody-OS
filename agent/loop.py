@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from agent.executor import Executor, RunContext, ToolCall, ToolResult
 from agent.signals import Signals
-from agent.tools import openai_tools
+from agent.tool_catalogue import openai_tools
 from agent.transfers import MemoryCustodyStore
 
 SYSTEM_PROMPT = """You are the Custody Agent for a lab. You move samples between locations for a

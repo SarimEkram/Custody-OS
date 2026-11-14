@@ -4,8 +4,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from agent.api import create_app
 from agent.intake import Intake, MemoryRequests, NoGrant, ParseFailed, llm_parser
+from agent.intake_api import create_app
 from agent.parse import Catalog
 from agent.transfers import MemoryCustodyStore
 

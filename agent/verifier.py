@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agent.executor import RunContext
-from agent.tools import TOOLS
+from agent.tool_catalogue import TOOLS
 from agent.transfers import MemoryCustodyStore, StateConflict
 
 # tool -> (state the transfer must be in, state it moves to, where the scan must happen)

@@ -1,6 +1,6 @@
 import pytest
 
-from agent.tools import TOOLS, irreversible_tools, openai_tools
+from agent.tool_catalogue import TOOLS, irreversible_tools, openai_tools
 
 LLM_TOOLS = {
     "parse_request", "request_confirmation", "lookup_sample", "reserve_station",

@@ -299,6 +299,8 @@ await db.voice_requests.create_index([("speaker_id", 1), ("created_at", -1)])
 ```
 
 ### Atlas Vector Search indexes
+
+> **Update 2026-11-14:** we use **Atlas Automated Embedding** (`EMBEDDINGS_PROVIDER=atlas_auto`). The index field is `{"type": "autoEmbed", "modality": "text", "path": "summary", "model": "voyage-4"}` plus the filter fields; Atlas embeds `summary` on insert and `$vectorSearch` takes `query: {"text": ...}` with `path: "summary"`. No `embedding` field is stored. Supported models: voyage-4, voyage-4-large, voyage-4-lite, voyage-code-4, voyage-code-3 (not voyage-3.5). `db/indexes.py` builds both indexes; the `vector` definitions below are the `voyage` fallback.
 Create via Atlas UI / Atlas CLI / `db.collection.create_search_index(SearchIndexModel(..., type="vectorSearch"))`.
 
 `ledger_vector`, on `ledger`:
@@ -316,6 +318,8 @@ Create via Atlas UI / Atlas CLI / `db.collection.create_search_index(SearchIndex
 Embedding dimension lives in one constant (`EMBED_DIM = 1024`). Embed `summary` on insert (agent side, before inserting; ledger is insert-only so no back-fill updates). Use Voyage `input_type="document"` for stored text and `"query"` for searches. Voyage is an embedding model, not an LLM. Provider comes from `EMBEDDINGS_PROVIDER`: `atlas_auto` lets Atlas Automated Embedding generate vectors (the app then makes no Voyage call; verify with the check script), `voyage` uses a key from Atlas → AI Model APIs → Model API Keys. Person A owns this; `ledger.append()` is the single place that embeds.
 
 ## Database users and roles
+
+> **Update 2026-11-14:** layer 2 is **live**. We created two custom roles, `agentRole` and `scannerRole` (same privileges as the four below, grouped per user), plus users `agent_svc` and `scanner_svc`. Verified: `agent_svc` gets `13 Unauthorized` on any ledger update/delete. See `db/roles.md`.
 
 We run on the hackathon-provided **Atlas Sandbox (Free cluster, formerly M0)**. See "Sandbox limits" below. Immutability is enforced in two layers, and the demo must work even if only the first layer is available:
 
@@ -338,6 +342,8 @@ We run on the hackathon-provided **Atlas Sandbox (Free cluster, formerly M0)**. 
 Demo moment: with `agent_svc`, run `db.ledger.updateOne(...)` → `not authorized` (only if layer 2 worked; otherwise show the validator rejection and the grep test instead). Note: revoking grants should go through `admin_svc` (the agent must not be able to edit its own grants).
 
 ## Sandbox limits (Atlas Free cluster)
+
+> **Update 2026-11-14:** we're on an **M10** cluster (MongoDB 9.0.7), not the free sandbox, so the limits below don't bind us. Kept for reference. Everything we use is verified in `db/CLUSTER_CHECK.md`.
 
 From the Atlas "Free Cluster Limits" docs (https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/). Confirm the tier on the cluster's Overview page; if the sandbox turns out to be Flex or dedicated, these limits are looser and nothing below changes.
 

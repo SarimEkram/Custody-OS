@@ -6,9 +6,9 @@ The only process that writes custody_events, and it does so as scanner_svc.
 import os
 
 from agent.db import client, database_name
-from agent.mongo_stores import MongoEventStore
 from services.config import LabConfig
 from services.scanner.app import create_app
+from services.scanner.store import MongoEventStore
 
 
 def create(config: LabConfig, store, secret: str):

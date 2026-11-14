@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agent.parse import Catalog, validate_parse
-from agent.tools import openai_tools
+from agent.tool_catalogue import openai_tools
 from agent.transfers import MemoryCustodyStore, next_id
 
 

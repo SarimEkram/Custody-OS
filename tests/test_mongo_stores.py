@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from agent.mongo_stores import (
     MongoCustodyStore,
-    MongoEventStore,
     find_grant,
     load_catalog,
     load_courier_travel,
@@ -15,6 +14,7 @@ from agent.mongo_stores import (
 from agent.transfers import StateConflict
 from agent.verifier import ScanBus
 from services.scanner.app import create_app
+from services.scanner.store import MongoEventStore
 
 
 def run(coro):

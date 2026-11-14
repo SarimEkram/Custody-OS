@@ -18,7 +18,6 @@ from agent.db import database_name  # noqa: E402
 from agent.mongo_stores import (  # noqa: E402
     MongoAudio,
     MongoCustodyStore,
-    MongoEventStore,
     MongoRequests,
     find_grant,
     load_catalog,
@@ -29,6 +28,7 @@ from agent.mongo_stores import (  # noqa: E402
 from agent.transfers import StateConflict  # noqa: E402
 from agent.verifier import ScanBus  # noqa: E402
 from scripts._env import load_env  # noqa: E402
+from services.scanner.store import MongoEventStore  # noqa: E402
 
 failures = []
 
@@ -72,7 +72,7 @@ async def scratch_round_trips() -> None:
         store = MongoCustodyStore(c, db)
 
         async def append(entry, session=None):
-            await db.ledger.insert_one(entry, session=session)
+            await db.scratch_audit.insert_one(entry, session=session)
 
         await store.block("TR-0001", "approval_pending")
         t = await store.get_transfer("TR-0001")
@@ -91,7 +91,7 @@ async def scratch_round_trips() -> None:
         t, s = await store.get_transfer("TR-0001"), await store.get_sample("TS-1")
         check("verified scan commits transfer + sample + ledger together",
               t["state"] == "checked_out" and s["status"] == "out"
-              and await db.ledger.count_documents({"k": "v1"}) == 1)  # fmt: skip
+              and await db.scratch_audit.count_documents({"k": "v1"}) == 1)  # fmt: skip
         check("datetimes come back timezone-aware", s["checked_out_at"].tzinfo is not None)
 
         try:
@@ -101,7 +101,7 @@ async def scratch_round_trips() -> None:
             check("a stale expected state is refused", False)
         except StateConflict:
             check("a stale expected state is refused and rolls back",
-                  await db.ledger.count_documents({"k": "v2"}) == 0
+                  await db.scratch_audit.count_documents({"k": "v2"}) == 0
                   and (await store.get_transfer("TR-0001"))["state"] == "checked_out")  # fmt: skip
 
         reqs = MongoRequests(db)

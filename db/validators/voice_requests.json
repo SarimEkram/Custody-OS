@@ -1,0 +1,14 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": ["source", "speaker_id", "transcript", "created_at"],
+    "properties": {
+      "source":        { "enum": ["voice", "typed"] },
+      "speaker_id":    { "bsonType": "string", "pattern": "^user:" },
+      "transcript":    { "bsonType": "string", "minLength": 1 },
+      "audio_file_id": { "bsonType": ["objectId", "null"] },
+      "audio_sha256":  { "bsonType": ["string", "null"] },
+      "created_at":    { "bsonType": "date" }
+    }
+  }
+}
