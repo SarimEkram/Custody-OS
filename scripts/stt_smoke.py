@@ -1,6 +1,6 @@
 """Live check: the ElevenLabs key, scribe_v3 and keyterms work on a short clip.
 
-.venv/bin/python scripts/stt_smoke.py [clip.wav|webm]   # no argument: synthesise one with macOS `say`
+.venv/bin/python scripts/stt_smoke.py [clip]   # no clip: synthesise one with macOS `say`
 """
 
 import asyncio

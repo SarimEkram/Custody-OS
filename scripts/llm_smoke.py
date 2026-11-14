@@ -38,9 +38,8 @@ async def main() -> int:
         return 1
     args = json.loads(calls[0]["function"]["arguments"])
     ok = "reason" in args
-    print(
-        f"{'PASS' if ok else 'FAIL'}  {calls[0]['function']['name']}({args})  [{len(tools)} tools offered]"
-    )
+    name = calls[0]["function"]["name"]
+    print(f"{'PASS' if ok else 'FAIL'}  {name}({args})  [{len(tools)} tools offered]")
     return 0 if ok else 1
 
 
