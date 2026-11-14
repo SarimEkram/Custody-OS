@@ -51,6 +51,8 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] Watcher also unblocks a transfer when an approval changes directly in the DB (safety net)
 - [x] Seed bug: scanner `location_id`s fixed in `db/seed.py` and in the live data (`FZ-A`, `SEQ-3`, ...)
 - [x] API accepts C's dashboard request bodies and returns the dashboard's audit fields (`agent/api.py`)
+- [x] Review of B's merged code against the rules and the gate contract: no violations
+- [x] `GET /state` and `GET /health` for the dashboard (`agent/api.py`)
 - [x] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
 - [x] Install `mongosh`, rehearse beat 4 (`db/BEAT4_CHEATSHEET.md`)
 - [ ] Test auditor LLM routing (blocked: B, needs the Groq key)
