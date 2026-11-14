@@ -28,7 +28,7 @@ We use two custom roles (one per service user) instead of the four listed in `DA
 |---|---|---|
 | `agent_svc` | `agentRole` | agent service |
 | `scanner_svc` | `scannerRole` | scanner service (only writer of `custody_events`) |
-| `admin_svc` | `atlasAdmin` (TODO: narrow to `readWrite@custody` + `dbAdmin@custody` before the demo) | setup scripts, seed, indexes, revoke script |
+| `admin_svc` | `readWrite@custody` + `dbAdmin@custody` (narrowed 2026-11-14; `db.indexes` and the full test suite verified; creating *new* search indexes untested under this role) | setup scripts, seed, indexes, revoke script |
 
 The team's personal `*_db_user` logins are `atlasAdmin` and are for setup only; the app never uses them.
 
