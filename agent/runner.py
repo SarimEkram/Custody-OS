@@ -36,7 +36,7 @@ class Runner:
         self.tasks: set[asyncio.Task] = set()
 
     async def run(self, transfer_id: str) -> Outcome:
-        t = self.store.transfers[transfer_id]
+        t = await self.store.get_transfer(transfer_id)
         refs = {k: t[k] for k in ("sample_id", "from", "to", "window") if t.get(k)}
         ctx = RunContext(self.agent_id, t["requested_by"], t["grant_id"], transfer_id,
                          t["request_id"], refs=refs)  # fmt: skip
@@ -53,7 +53,7 @@ class Runner:
         )
         if not recover:
             return Outcome(result)
-        revoker = self.store.transfers[transfer_id].get("halted_by") or t["requested_by"]
+        revoker = (await self.store.get_transfer(transfer_id)).get("halted_by") or t["requested_by"]
         return Outcome(result, await self.planner.run(ctx, revoker))
 
     def start(self, transfer_id: str) -> asyncio.Task:

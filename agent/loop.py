@@ -61,12 +61,12 @@ class AgentLoop:
         self.llm, self.executor, self.store, self.max_steps = llm, executor, store, max_steps
         self.signals, self.confirmations, self.wait_timeout = signals, confirmations, wait_timeout
 
-    def _sync_state(self, ctx: RunContext) -> None:
+    async def _sync_state(self, ctx: RunContext) -> None:
         """requested -> reserved once the station is held and the courier is booked."""
-        transfer = self.store.transfers[ctx.transfer_id]
+        transfer = await self.store.get_transfer(ctx.transfer_id)
         booked = {"reservation_id", "courier_job_id"} <= ctx.refs.keys()
         if transfer["state"] == "requested" and booked:
-            self.store.set_state(ctx.transfer_id, "reserved")
+            await self.store.set_state(ctx.transfer_id, "reserved")
 
     async def _resolve(self, call: ToolCall, ctx: RunContext, res: ToolResult) -> ToolResult:
         """Wait out PENDING_* results, then retry the call through the gate."""
@@ -88,15 +88,15 @@ class AgentLoop:
                     "approval_pending",
                     f"approval:{(res.content or {}).get('approval_id')}",
                 )
-            self.store.block(tid, reason)
+            await self.store.block(tid, reason)
             outcome = await self.signals.wait(key, self.wait_timeout)
             if outcome in ("confirmed", "approved"):
-                self.store.unblock(tid)
+                await self.store.unblock(tid)
                 res = await self.executor.execute(call, ctx)
                 continue
-            before = self.store.transfers[tid]["blocked_from"]
+            before = (await self.store.get_transfer(tid))["blocked_from"]
             if before in ("requested", "reserved"):  # nothing irreversible happened yet
-                self.store.set_state(tid, "cancelled")
+                await self.store.set_state(tid, "cancelled")
                 raise _Ended("denied" if outcome == "denied" else "timeout", False)
             raise _Ended("denied" if outcome == "denied" else "timeout", True)
         return res
@@ -131,7 +131,7 @@ class AgentLoop:
                 except _Ended as e:
                     return RunResult(e.status, results=results, needs_recovery=e.needs_recovery)
                 results.append(res)
-                self._sync_state(ctx)
+                await self._sync_state(ctx)
                 content = res.content
                 detail = content if isinstance(content, dict) else {"detail": content}
                 payload = {"status": res.status, "verification": res.verification, **detail}

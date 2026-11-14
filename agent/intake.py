@@ -16,7 +16,7 @@ from typing import Any
 
 from agent.parse import Catalog, validate_parse
 from agent.tools import openai_tools
-from agent.transfers import MemoryCustodyStore
+from agent.transfers import MemoryCustodyStore, next_id
 
 
 class NoGrant(Exception):
@@ -33,10 +33,10 @@ class MemoryRequests:
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {}
 
-    def next_id(self) -> str:
-        return f"VR-{len(self.docs) + 1}"
+    async def next_id(self) -> str:
+        return next_id("VR", self.docs)
 
-    def insert(self, doc: dict) -> None:
+    async def insert(self, doc: dict) -> None:
         self.docs[doc["_id"]] = doc
 
 
@@ -105,10 +105,10 @@ class Intake:
             result.problems = [{"field": "request", "value": None, "reason": "not_understood"}]
 
         now = datetime.now(UTC)
-        rid = self.requests.next_id()
-        transfer_id = self.store.next_transfer_id() if result.ok else None
+        rid = await self.requests.next_id()
+        transfer_id = await self.store.next_transfer_id() if result.ok else None
         audio = audio or {}
-        self.requests.insert({
+        await self.requests.insert({
             "_id": rid, "source": source, "speaker_id": user_id,
             "audio_file_id": audio.get("file_id"), "audio_sha256": audio.get("sha256"),
             "audio_duration_secs": audio.get("duration"), "stt": stt, "transcript": text,
@@ -118,7 +118,7 @@ class Intake:
         })  # fmt: skip
         if transfer_id:
             p = result.parsed
-            self.store.create_transfer({
+            await self.store.create_transfer({
                 "_id": transfer_id, "sample_id": p["sample_id"], "from": p["from"], "to": p["to"],
                 "window": p.get("window"), "requested_by": user_id, "grant_id": grant_id,
                 "request_id": rid, "source": source, "readback_confirmed": False,

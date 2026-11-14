@@ -51,7 +51,7 @@ class ConfirmationService:
         self.count = 0
 
     async def request(self, transfer_id: str, eta_minutes: float | None) -> dict:
-        transfer = self.store.transfers[transfer_id]
+        transfer = await self.store.get_transfer(transfer_id)
         text = readback_text(transfer, self.catalog, eta_minutes, self.clock())
         self.count += 1
         conf_id = f"CONF-{self.count}"
@@ -62,7 +62,7 @@ class ConfirmationService:
         return {"confirmation_request_id": conf_id, "readback_text": text}
 
     async def confirm(self, transfer_id: str, user_id: str, method: str) -> None:
-        transfer = self.store.transfers[transfer_id]  # KeyError -> unknown transfer
+        transfer = await self.store.get_transfer(transfer_id)  # KeyError -> unknown transfer
         pending = self.pending.get(transfer_id)
         if not pending:
             raise NoPending(transfer_id)
@@ -78,7 +78,7 @@ class ConfirmationService:
                          "method": method, "confirmation_request_id": pending["id"]},
             "summary": f"{user_id} confirmed the read-back by {method}.",
         })  # fmt: skip
-        transfer["readback_confirmed"] = True
+        await self.store.confirm_readback(transfer_id)
         del self.pending[transfer_id]
         self.signals.signal(f"confirm:{transfer_id}", "confirmed")
 

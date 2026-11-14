@@ -45,8 +45,10 @@ def submit(intake, text=TEXT, user="user:jlee"):
 def test_valid_typed_request_creates_request_transfer_intake_entry_and_starts_the_run():
     intake, ledger, requests, store, runs = build()
     out = submit(intake)
-    assert out == {"request_id": "VR-0001", "transcript": TEXT, "parsed": GOOD,
-                   "low_confidence_terms": [], "transfer_id": "TR-0001", "problems": []}  # fmt: skip
+    assert out == {
+        "request_id": "VR-0001", "transcript": TEXT, "parsed": GOOD,
+        "low_confidence_terms": [], "transfer_id": "TR-0001", "problems": [],
+    }  # fmt: skip
     req = requests.docs["VR-0001"]
     assert (req["source"], req["speaker_id"], req["audio_file_id"], req["stt"]) == (
         "typed", "user:jlee", None, None,

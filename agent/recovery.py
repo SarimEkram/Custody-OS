@@ -86,8 +86,8 @@ class RecoveryPlanner:
 
     async def run(self, ctx: RunContext, revoker: str) -> RecoveryResult:
         tid, sample_id = ctx.transfer_id, ctx.refs["sample_id"]
-        if self.store.transfers[tid]["state"] not in ("revoked", "recovering"):
-            self.store.set_state(tid, "revoked")
+        if (await self.store.get_transfer(tid))["state"] not in ("revoked", "recovering"):
+            await self.store.set_state(tid, "revoked")
         comp = replace(ctx, on_behalf_of=revoker, outcome_type="compensation")  # shares refs
 
         job_id = ctx.refs.get("courier_job_id")
@@ -110,12 +110,12 @@ class RecoveryPlanner:
                     rid = e["response"]["reservation_id"]
                     await self._call(comp, "cancel_reservation", reservation_id=rid)
 
-        sample = self.store.samples[sample_id]
+        sample = await self.store.get_sample(sample_id)
         if sample["status"] != "out":  # never left the freezer: nothing to recover
-            self.store.set_state(tid, "cancelled")
+            await self.store.set_state(tid, "cancelled")
             return RecoveryResult("cancelled")
 
-        self.store.set_state(tid, "recovering")
+        await self.store.set_state(tid, "recovering")
         limit, out_at = sample["max_minutes_out"], sample["checked_out_at"]
         spent = (self.clock() - out_at).total_seconds() * self.demo_speed / 60
         origin = (job or {}).get("origin") or ctx.refs["from"]
@@ -164,7 +164,7 @@ class RecoveryPlanner:
             response={"minutes_out": minutes_out, "exceeded": exceeded, "limit": limit},
         )
         if exceeded:
-            self.store.mark_compromised(sample_id)
+            await self.store.mark_compromised(sample_id)
             await self._log(
                 ctx,
                 "violation",

@@ -81,8 +81,14 @@ class Verifier:
         elif scan["location_id"] != ctx.refs[where]:
             problem = f"expected scan at {ctx.refs[where]}, scanned at {scan['location_id']}"
         else:
-            try:
-                self.store.apply_verified_scan(ctx.transfer_id, expect_state, next_state, scan)
+            entry = self._entry(
+                ctx, correlation_id, outcome_id, "verification", "confirmed",
+                f"Scanner confirmed {tool} for {sample}; transfer is now {next_state}.",
+            )  # fmt: skip
+            try:  # state, sample and this ledger entry are written together
+                await self.store.apply_verified_scan(
+                    ctx.transfer_id, expect_state, next_state, scan, entry, self.append
+                )
             except StateConflict as e:
                 problem = str(e)
         if problem:
@@ -96,8 +102,4 @@ class Verifier:
             ))  # fmt: skip
             return "mismatch"
 
-        await self.append(self._entry(
-            ctx, correlation_id, outcome_id, "verification", "confirmed",
-            f"Scanner confirmed {tool} for {sample}; transfer is now {next_state}.",
-        ))  # fmt: skip
         return "confirmed"
