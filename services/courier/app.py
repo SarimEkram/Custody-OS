@@ -73,6 +73,10 @@ def create_app(
         jobs[jid] = {"job_id": jid, **body.model_dump(), "eta_minutes": eta, "status": "assigned"}
         return view(jobs[jid])
 
+    @app.get("/jobs")
+    def list_jobs() -> list[dict]:
+        return [view(job) for job in jobs.values()]
+
     @app.get("/jobs/{jid}")
     def get_job(jid: str) -> dict:
         return view(get_or_404(jid))
