@@ -26,6 +26,7 @@ LOCATIONS = [
         "travel_minutes": {"FZ-A": 2, "FZ-B": 4},
     },
     {"_id": "CORR-1", "name": "Corridor 1", "kind": "corridor", "travel_minutes": {}},
+    {"_id": "FOR-LAB", "name": "Forensics Lab", "kind": "lab", "travel_minutes": {}},
 ]
 SAMPLES = [
     {"_id": "TS-1042", "status": "stored", "location_id": "FZ-B"},
@@ -36,6 +37,7 @@ IDENTITIES = [
     {"_id": "scanner:reader-fza", "kind": "scanner", "location_id": "FZA"},  # seed typo: no hyphen
     {"_id": "scanner:reader-fzb", "kind": "scanner", "location_id": "FZ-B"},  # correct
     {"_id": "scanner:reader-seq3", "kind": "scanner", "location_id": "SEQ3"},
+    {"_id": "scanner:reader-forlab", "kind": "scanner", "location_id": "FORLAB"},
     {"_id": "scanner:reader-ghost", "kind": "scanner", "location_id": "NOWHERE"},
     {"_id": "user:jlee", "kind": "human"},
 ]
@@ -55,6 +57,7 @@ def test_readers_resolve_to_real_locations_even_with_hyphen_typos_in_the_seed():
         "scanner:reader-fza": "FZ-A",
         "scanner:reader-fzb": "FZ-B",
         "scanner:reader-seq3": "SEQ-3",
+        "scanner:reader-forlab": "FOR-LAB",
     }
     assert c.unresolved_readers == ["scanner:reader-ghost"]  # reported, never guessed
 
@@ -62,11 +65,15 @@ def test_readers_resolve_to_real_locations_even_with_hyphen_typos_in_the_seed():
 def test_location_to_reader_maps_are_split_by_kind():
     c = cfg()
     assert c.freezer_readers == {"FZ-A": "scanner:reader-fza", "FZ-B": "scanner:reader-fzb"}
-    assert c.station_readers == {"SEQ-3": "scanner:reader-seq3"}
+    assert c.station_readers == {
+        "SEQ-3": "scanner:reader-seq3",
+        "FOR-LAB": "scanner:reader-forlab",  # kind "lab" is a destination too
+    }
     assert c.courier_readers == {
         "FZ-A": "scanner:reader-fza",
         "FZ-B": "scanner:reader-fzb",
         "SEQ-3": "scanner:reader-seq3",
+        "FOR-LAB": "scanner:reader-forlab",
     }
 
 
