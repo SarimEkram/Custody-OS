@@ -7,6 +7,7 @@ Mongo-backed one (scanner_svc user) once the Atlas URIs exist.
 
 import hashlib
 import hmac
+import inspect
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
@@ -57,7 +58,7 @@ def create_app(store: Store, readers: dict[str, str], samples: set[str], secret:
     app = FastAPI(title="scanner")
 
     @app.post("/scan", status_code=201)
-    def scan(raw: RawScan) -> dict:
+    async def scan(raw: RawScan) -> dict:
         if raw.reader_id not in readers:
             raise HTTPException(404, f"unknown reader {raw.reader_id}")
         if raw.sample_id not in samples:
@@ -68,7 +69,9 @@ def create_app(store: Store, readers: dict[str, str], samples: set[str], secret:
         event["scanner_id"] = raw.reader_id
         event["scanned_at"] = datetime.now(UTC)
         event["signature"] = sign(secret, event)
-        store.insert(event)
+        written = store.insert(event)
+        if inspect.isawaitable(written):  # the Mongo store is async, the memory one is not
+            await written
         return {"correlation_id": raw.correlation_id, "scanned_at": event["scanned_at"].isoformat()}
 
     return app

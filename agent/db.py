@@ -11,7 +11,9 @@ from pymongo import AsyncMongoClient
 
 
 def client(uri: str) -> AsyncMongoClient:
-    return AsyncMongoClient(uri, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=8000)
+    return AsyncMongoClient(
+        uri, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=8000, tz_aware=True
+    )
 
 
 def database_name() -> str:
