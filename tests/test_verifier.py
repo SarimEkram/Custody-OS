@@ -97,8 +97,8 @@ def test_physical_states_can_only_be_set_by_a_verified_scan():
     store = MemoryCustodyStore({}, {"TR-1": {"_id": "TR-1", "state": "requested", "history": []}})
     for physical in ("checked_out", "in_transit", "received", "recovered"):
         with pytest.raises(StateConflict):
-            store.set_state("TR-1", physical)
-    store.set_state("TR-1", "blocked")
+            run(store.set_state("TR-1", physical))
+    run(store.set_state("TR-1", "blocked"))
     assert store.transfers["TR-1"]["state"] == "blocked"
 
 

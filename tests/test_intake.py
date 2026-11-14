@@ -45,16 +45,16 @@ def submit(intake, text=TEXT, user="user:jlee"):
 def test_valid_typed_request_creates_request_transfer_intake_entry_and_starts_the_run():
     intake, ledger, requests, store, runs = build()
     out = submit(intake)
-    assert out == {"request_id": "VR-1", "transcript": TEXT, "parsed": GOOD,
-                   "low_confidence_terms": [], "transfer_id": "TR-1", "problems": []}  # fmt: skip
-    req = requests.docs["VR-1"]
+    assert out == {"request_id": "VR-0001", "transcript": TEXT, "parsed": GOOD,
+                   "low_confidence_terms": [], "transfer_id": "TR-0001", "problems": []}  # fmt: skip
+    req = requests.docs["VR-0001"]
     assert (req["source"], req["speaker_id"], req["audio_file_id"], req["stt"]) == (
         "typed", "user:jlee", None, None,
     )  # fmt: skip
-    assert req["transcript"] == TEXT and req["transfer_id"] == "TR-1"
-    tr = store.transfers["TR-1"]
+    assert req["transcript"] == TEXT and req["transfer_id"] == "TR-0001"
+    tr = store.transfers["TR-0001"]
     assert (tr["state"], tr["requested_by"], tr["grant_id"], tr["request_id"]) == (
-        "requested", "user:jlee", "GRANT-0007", "VR-1",
+        "requested", "user:jlee", "GRANT-0007", "VR-0001",
     )  # fmt: skip
     assert (tr["sample_id"], tr["from"], tr["to"], tr["source"]) == (
         "TS-1042",
@@ -68,16 +68,16 @@ def test_valid_typed_request_creates_request_transfer_intake_entry_and_starts_th
         entry["entry_type"] == "intake" and entry["tool"] is None and entry["decision"] == "allow"
     )
     assert (entry["actor"], entry["on_behalf_of"]) == ("user:jlee", "user:jlee")
-    assert (entry["request_id"], entry["transfer_id"]) == ("VR-1", "TR-1")
+    assert (entry["request_id"], entry["transfer_id"]) == ("VR-0001", "TR-0001")
     assert entry["response"]["transcript"] == TEXT and entry["correlation_id"]
-    assert runs == ["TR-1"]
+    assert runs == ["TR-0001"]
 
 
 def test_invalid_request_is_recorded_but_creates_no_transfer_and_starts_nothing():
     intake, ledger, requests, store, runs = build({**GOOD, "sample_id": "TS-1024"})
     out = submit(intake)
     assert out["transfer_id"] is None and out["problems"][0]["reason"] == "unknown_sample"
-    assert requests.docs["VR-1"]["transfer_id"] is None
+    assert requests.docs["VR-0001"]["transfer_id"] is None
     assert store.transfers == {} and ledger.entries == [] and runs == []
 
 
@@ -96,8 +96,8 @@ def test_speaker_without_an_active_grant_is_refused_and_nothing_is_stored():
 
 def test_ids_are_sequential_per_request_and_transfer():
     intake, *_ = build()
-    assert submit(intake)["transfer_id"] == "TR-1"
-    assert submit(intake)["request_id"] == "VR-2"
+    assert submit(intake)["transfer_id"] == "TR-0001"
+    assert submit(intake)["request_id"] == "VR-0002"
 
 
 def test_post_transfers_returns_the_voice_contract_shape():

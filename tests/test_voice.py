@@ -125,7 +125,7 @@ def test_stt_failures_become_stt_error_without_leaking_the_key(handler):
 def test_voice_request_stores_audio_hash_transcript_speaker_then_creates_the_transfer():
     voice, stt, ledger, requests, store, audio, runs = build()
     out = submit(voice)
-    assert out["transfer_id"] == "TR-1" and out["parsed"] == GOOD
+    assert out["transfer_id"] == "TR-0001" and out["parsed"] == GOOD
     req = requests.docs[out["request_id"]]
     assert req["source"] == "voice" and req["speaker_id"] == "user:jlee"
     assert req["audio_sha256"] == hashlib.sha256(AUDIO).hexdigest()
@@ -134,7 +134,7 @@ def test_voice_request_stores_audio_hash_transcript_speaker_then_creates_the_tra
     assert req["stt"]["transcription_id"] == "tx-1" and "TS-1042" in req["stt"]["keyterms"]
     assert all(w["type"] == "word" for w in req["words"])
     assert ledger.entries[0]["response"]["audio_sha256"] == req["audio_sha256"]
-    assert ledger.entries[0]["response"]["model_id"] == "scribe_v3" and runs == ["TR-1"]
+    assert ledger.entries[0]["response"]["model_id"] == "scribe_v3" and runs == ["TR-0001"]
 
 
 def test_keyterms_are_every_sample_id_and_location_name_from_the_catalog():

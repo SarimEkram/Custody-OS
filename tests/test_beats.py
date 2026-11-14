@@ -49,9 +49,11 @@ def test_beat_1_a_spoken_request_ends_received_with_every_step_verified_by_a_sca
         return out
 
     out = asyncio.run(main())
-    assert out["transfer_id"] == "TR-1" and runner.errors == {}
-    assert store.transfers["TR-1"]["state"] == "received"
-    assert requests.docs["VR-1"]["source"] == "voice" and requests.docs["VR-1"]["audio_sha256"]
+    assert out["transfer_id"] == "TR-0001" and runner.errors == {}
+    assert store.transfers["TR-0001"]["state"] == "received"
+    assert (
+        requests.docs["VR-0001"]["source"] == "voice" and requests.docs["VR-0001"]["audio_sha256"]
+    )
     first = ledger.entries[0]
     assert first["entry_type"] == "intake" and first["on_behalf_of"] == "user:jlee"
     statuses = [e["status"] for e in ledger.entries if e["entry_type"] == "verification"]
@@ -87,8 +89,8 @@ def test_beat_2_blocked_until_a_supervisor_approves_then_resumes_where_it_stoppe
     bus, at_approval = loop.parts["bus"], {}
 
     def supervisor_approves():
-        at_approval["transfer_state"] = store.transfers["TR-1"]["state"]
-        at_approval["blocked_reason"] = store.transfers["TR-1"]["blocked_reason"]
+        at_approval["transfer_state"] = store.transfers["TR-0001"]["state"]
+        at_approval["blocked_reason"] = store.transfers["TR-0001"]["blocked_reason"]
         at_approval["scans"] = [s["type"] for s in bus.scans.values()]  # the freezer saw nothing
         gate_holder["gate"].approved = True
         loop.signals.signal("approval:APR-1", "approved")
@@ -101,7 +103,7 @@ def test_beat_2_blocked_until_a_supervisor_approves_then_resumes_where_it_stoppe
     asyncio.run(main())
     assert at_approval == {"transfer_state": "blocked", "blocked_reason": "approval_pending",
                            "scans": []}  # fmt: skip
-    assert runner.errors == {} and store.transfers["TR-1"]["state"] == "received"
+    assert runner.errors == {} and store.transfers["TR-0001"]["state"] == "received"
     decisions = [e["decision"] for e in ledger.entries if e["entry_type"] == "decision"]
     assert (
         "pending_approval" in decisions and decisions.index("pending_approval") < len(decisions) - 1
