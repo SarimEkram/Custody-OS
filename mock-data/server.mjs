@@ -50,6 +50,9 @@ function fresh() {
     runs: [],
     grantSeq: 8,
     conf: 0,
+    heard: [], // what the mock "hears" next, for POST /confirm/voice
+    tts: process.env.MOCK_TTS !== '0', // spoken read-back on/off
+    voiceConfirm: true, // false: the confirm/voice route does not exist (404), like the real backend today
     grants: {
       'GRANT-0007': {
         _id: 'GRANT-0007',
@@ -235,13 +238,16 @@ async function run(ctx) {
     led(ctx, { tool: 'checkout_sample', reversible: false, decision: 'pending_confirmation', rule_hits: ['readback_required'], summary: 'Checkout is waiting for the technician to confirm the read-back.', reason: 'Voice/typed requests need a read-back before the first irreversible step.' })
     setTransfer(t, { state: 'blocked', blocked_reason: 'readback_pending' })
     ctx.pendingConfirm = { id: `CONF-${++S.conf}` }
+    const spoken = `I'll check out ${t.sample_id} from ${from} and send it to ${to}, arriving about 2:04. Say \u201cconfirm\u201d to go ahead.`
     broadcast('confirmation_request', {
       id: ctx.pendingConfirm.id,
       transfer_id: t._id,
-      text: `I'll check out ${t.sample_id} from ${from} and send it to ${to}, arriving about 2:04. Confirm?`,
+      text: spoken,
+      readback_text: spoken,
+      ...(S.tts ? { audio_url: `/api/transfers/${t._id}/readback/audio` } : {}), // present only when text-to-speech is on
     })
     await ctx.until(new Promise((res) => (ctx.waiters.confirm = res)))
-    led(ctx, { entry_type: 'confirmation', tool: null, summary: `${t.requested_by.replace('user:', '')} confirmed the read-back by button.`, response: { readback_text: `Check out ${t.sample_id} to ${to}`, confirmed_by: t.requested_by, method: 'button' } })
+    led(ctx, { entry_type: 'confirmation', tool: null, summary: `${t.requested_by.replace('user:', '')} confirmed the read-back by ${ctx.confirmMethod ?? 'button'}.`, response: { readback_text: `Check out ${t.sample_id} to ${to}`, confirmed_by: t.requested_by, method: ctx.confirmMethod ?? 'button', ...(ctx.heard ? { transcript: ctx.heard } : {}) } })
     setTransfer(t, { state: 'reserved', blocked_reason: null, readback_confirmed: true })
 
     // Forensic gate: supervisor approval.
@@ -554,6 +560,40 @@ const readJson = (req) =>
       }
     })
   })
+// A short tone standing in for the spoken read-back (the real backend returns an MP3 from text-to-speech).
+function toneWav(ms = Number(process.env.MOCK_AUDIO_MS ?? 700), hz = 440, rate = 8000) {
+  const n = Math.floor((rate * ms) / 1000)
+  const b = Buffer.alloc(44 + n * 2)
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write('fmt ', 12)
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24)
+  b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40)
+  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / rate) * 6000), 44 + i * 2)
+  return b
+}
+
+// The decision belongs to the backend, never the browser. Err on the side of NOT confirming.
+function isConfirmation(heard) {
+  const t = heard.toLowerCase()
+  if (/\b(don'?t|do not|cancel|no|not|never|stop|nothing|wait)\b/.test(t)) return false
+  return /\b(confirm|confirmed)\b/.test(t)
+}
+
+// Pull a text field out of a multipart body (the mock ignores the audio itself).
+const readRaw = (req) => new Promise((resolve) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => resolve(Buffer.concat(c))) })
+const formField = (raw, name) => new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r\\n]*)`).exec(raw.toString('latin1'))?.[1] ?? null
+
+// Same checks as the real confirm route (agent/intake_api.py).
+function confirmChecks(id, who) {
+  const ctx = S.runs.find((x) => x.t._id === id)
+  if (!ctx) return { status: 404, body: { detail: `unknown transfer ${id}` } }
+  if (ctx.halted || ['revoked', 'recovering', 'recovered', 'cancelled', 'received'].includes(ctx.t.state)) {
+    return { status: 409, body: { detail: `This transfer was halted (${ctx.haltInfo?.reason ?? 'no longer active'}), so it can no longer be confirmed.` } }
+  }
+  if (ctx.t.blocked_reason !== 'readback_pending') return { status: 409, body: { detail: `no read-back is waiting on ${id}` } }
+  if (who !== ctx.t.requested_by) return { status: 403, body: { detail: 'only the person who made the request can confirm' } }
+  return { ctx }
+}
+
 const drain = (req) => new Promise((resolve) => { req.on('data', () => {}); req.on('end', resolve) })
 
 const server = http.createServer(async (req, res) => {
@@ -594,6 +634,31 @@ const server = http.createServer(async (req, res) => {
     })
   }
 
+  // Spoken read-back (text-to-speech). Real: audio/mpeg, 409 when nothing is pending, absent when TTS is off.
+  if (m === 'GET' && (g = /^\/transfers\/([^/]+)\/readback\/audio$/.exec(path))) {
+    const ctx = S.runs.find((x) => x.t._id === g[1])
+    if (!S.tts) return send(res, 404, { detail: 'Not Found' })
+    if (!ctx || ctx.t.blocked_reason !== 'readback_pending') return send(res, 409, { detail: `no read-back is waiting on ${g[1]}` })
+    const wav = toneWav()
+    res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wav.length, 'Cache-Control': 'no-store' })
+    return res.end(wav)
+  }
+
+  // Confirm by voice (PROPOSED contract, see DASHBOARD_BACKEND_ISSUES.md #4). The backend decides what counts.
+  if (m === 'POST' && (g = /^\/transfers\/([^/]+)\/confirm\/voice$/.exec(path))) {
+    if (!S.voiceConfirm) { await drain(req); return send(res, 404, { detail: 'Not Found' }) }
+    const raw = await readRaw(req)
+    const who = formField(raw, 'user_id') ?? 'user:jlee'
+    const check = confirmChecks(g[1], who)
+    if (check.status) return send(res, check.status, check.body)
+    const heard = S.heard.shift() ?? 'confirm'
+    if (!isConfirmation(heard)) return send(res, 200, { confirmed: false, transcript: heard, reason: 'not_recognized' })
+    check.ctx.confirmMethod = 'voice'
+    check.ctx.heard = heard
+    check.ctx.waiters.confirm?.()
+    return send(res, 200, { confirmed: true, transcript: heard })
+  }
+
   if (m === 'POST' && path === '/voice/requests') {
     await drain(req) // multipart audio is ignored; the transcript is scripted
     const text = VOICE_SCRIPT[S.voiceCalls++ % VOICE_SCRIPT.length]
@@ -613,14 +678,9 @@ const server = http.createServer(async (req, res) => {
 
   let r
   if (m === 'POST' && (r = /^\/transfers\/([^/]+)\/confirm$/.exec(path))) {
-    const ctx = S.runs.find((x) => x.t._id === r[1])
-    if (!ctx) return send(res, 404, { detail: `unknown transfer ${r[1]}` })
-    if (ctx.halted || ['revoked', 'recovering', 'recovered', 'cancelled', 'received'].includes(ctx.t.state)) {
-      return send(res, 409, { detail: `This transfer was halted (${ctx.haltInfo?.reason ?? 'no longer active'}), so it can no longer be confirmed.` })
-    }
-    if (ctx.t.blocked_reason !== 'readback_pending') return send(res, 409, { detail: `no read-back is waiting on ${r[1]}` })
-    if (user !== ctx.t.requested_by) return send(res, 403, { detail: 'only the person who made the request can confirm' })
-    ctx.waiters.confirm?.()
+    const check = confirmChecks(r[1], user)
+    if (check.status) return send(res, check.status, check.body)
+    check.ctx.waiters.confirm?.()
     return send(res, 200, { confirmed: true })
   }
 
@@ -691,6 +751,11 @@ const server = http.createServer(async (req, res) => {
     const e = note({ entry_type: 'outcome', actor: 'agent:custody-01', on_behalf_of: 'user:jlee', grant_id: currentGrantId(), transfer_id: lastT?._id ?? 'TR-0031', sample_id: 'TS-1077', request_id: lastT?.request_id ?? null, tool: 'checkout_sample', reversible: false, status: 'sent', correlation_id: `c-gap-${S.seq}`, summary: 'Freezer service accepted checkout; no scanner confirmation arrived.' })
     return send(res, 200, { ok: true, _id: e._id })
   }
+
+  // Test switches (mock only): what the mock "hears" next; spoken read-back on/off; confirm/voice route on/off.
+  if (m === 'POST' && path === '/mock/heard') { S.heard.push(String(body.text ?? '')); return send(res, 200, { queued: S.heard.length }) }
+  if (m === 'POST' && path === '/mock/tts') { S.tts = body.on !== false; return send(res, 200, { tts: S.tts }) }
+  if (m === 'POST' && path === '/mock/voice-confirm') { S.voiceConfirm = body.on !== false; return send(res, 200, { voiceConfirm: S.voiceConfirm }) }
 
   if (m === 'POST' && path === '/mock/reset') {
     fresh()

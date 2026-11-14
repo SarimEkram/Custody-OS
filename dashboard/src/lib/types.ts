@@ -269,6 +269,13 @@ export interface AuditResult {
   rows?: unknown
 }
 
+/** POST /transfers/{id}/confirm/voice: the backend decides whether the clip was a confirmation. */
+export interface VoiceConfirmResult {
+  confirmed: boolean
+  transcript?: string
+  reason?: string
+}
+
 /** GET /audit/requests/{id}/verify */
 export interface AudioVerification {
   request_id: string

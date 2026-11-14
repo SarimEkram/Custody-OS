@@ -12,6 +12,7 @@ calls these endpoints, shows a clear message while they're missing, and will lig
 | 1 | `POST /grants/{id}/reissue` does not exist | Person A (grants, ledger) | The **Restore authority** button |
 | 2 | `GET /voice/requests/{id}/audio` does not exist | Person B (voice, GridFS) | The Auditor's **Play original audio** button |
 | 3 | `courier_position` can't place the dot after a reload mid-recovery | Person B (courier, events) | Polish only |
+| 4 | Voice confirmation: `POST /transfers/{id}/confirm/voice` and a spoken "say confirm" cue | Person B (voice, confirmation) | Confirming the read-back by voice |
 
 ---
 
@@ -142,6 +143,72 @@ without any memory. Keep the existing fields unchanged.
 ### Dashboard follow-up (Person C)
 A few lines in `dashboard/src/lib/courier.ts` (`resolveCourier`) to prefer these fields when present. Ping me when
 the event has them.
+
+---
+
+## 4. Voice confirmation: `POST /transfers/{id}/confirm/voice` and the spoken cue
+
+> Optional per the plan (`BUILD_PLAN.md` cut list 2b: "say confirm → button only"), but the dashboard side is built
+> and waiting. The button confirm always keeps working.
+
+### The flow the dashboard implements
+1. The read-back card appears. The dashboard plays the spoken read-back (`audio_url`, already provided).
+2. When the audio **ends**, it opens the microphone and **listens for up to 10 seconds** for the word "confirm"
+   (it stops early once it has heard a complete utterance).
+3. It uploads that clip to the endpoint below. If the backend says it was a confirmation, the card clears when the
+   transfer update arrives, exactly as with the button. If not, it shows what was heard and offers "Listen again".
+
+### What happens today
+There is no route that processes a spoken confirmation. `POST /transfers/{id}/confirm` accepts `method: "voice"` but
+only records that label; nothing transcribes the audio or decides it was a confirmation. The dashboard therefore
+shows *"Voice confirmation isn't available on this backend yet. Use the Confirm button."* and falls back to the button.
+
+Please **don't** reuse `POST /voice/requests` (it would try to start a new transfer from the word "confirm"), and the
+dashboard must not decide what was said (the browser never calls ElevenLabs, and the decision is part of the audit trail).
+
+### What to build
+**`POST /transfers/{transfer_id}/confirm/voice`**, multipart: `audio` (file), `user_id` (form, `^user:`).
+
+1. Transcribe with the existing `ElevenLabsSTT` (keyterms: just `confirm`). Same limits as intake (1 MB, 30 s).
+2. **Decide on the server** whether it is an affirmative confirmation. Suggested: accept "confirm", "yes confirm",
+   "confirmed"; **reject anything negated or different** ("don't confirm", "cancel", "no", "confirm nothing"). Keep the
+   phrase list in one place with tests; err on the side of *not* confirming.
+3. If it matches, run the existing confirm path (`ConfirmationService.confirm`) with `method: "voice"`. Rules unchanged:
+   only the requester can confirm (403), a read-back must be pending (409), the transfer must exist (404), identity is the
+   logged-in `user_id` and **never** the voice (rule 6).
+4. **Keep the evidence.** Store the clip in GridFS and put the transcript and `audio_sha256` in the confirmation ledger
+   entry's `response`, next to `readback_text` and `method: "voice"`, so an auditor can hear what was said.
+   Do **not** create a new transfer or a request that looks like one.
+5. Respond `200 {"confirmed": true, "transcript": "confirm"}` or, when it wasn't a confirmation,
+   `200 {"confirmed": false, "transcript": "what was heard", "reason": "not_recognized"}`.
+   Errors use `{"detail": ...}`: `413` too large, `422` no speech, `503` speech-to-text down (message
+   "Speech-to-text is unavailable; use the Confirm button.").
+
+### Make the agent say the cue
+The spoken read-back is the pending read-back text (`SpokenPrompts.readback`), which today ends "...Confirm?".
+Please make the text end with an explicit instruction, for example:
+
+> "I'll check out TS-1042 from Freezer B and send it to Sequencing Station 3, arriving about 2:04. **Say “confirm” to go ahead.**"
+
+Put it in the read-back text itself (not only in the audio) so that what is heard is what is shown and what is recorded
+in the ledger, consistent with the "what is heard is what will run" rule in `SpokenPrompts`. The dashboard also shows
+the cue on screen while listening, so it works with or without audio.
+
+### Acceptance checklist
+- [ ] "confirm" (clear speech) returns `confirmed: true`, writes a confirmation ledger entry with `method: "voice"`,
+      the transcript and the audio hash, and unblocks the transfer like the button does.
+- [ ] "cancel", "don't confirm", "no" return `confirmed: false` and change nothing.
+- [ ] A different user than the requester gets 403; nothing pending gets 409; unknown transfer gets 404.
+- [ ] Silence or noise returns 422 or `confirmed: false`, never a confirmation.
+- [ ] No new `transfers` document and no new intake `voice_requests` doc is created by this call.
+- [ ] The spoken and displayed read-back end with the "say confirm" cue.
+
+### How to check it end to end
+1. Start the backend with `ELEVENLABS_API_KEY` and `ELEVENLABS_TTS_VOICE_ID`, and `cd dashboard && npm run dev` (Chrome).
+2. Send a request (typed or spoken). The read-back is spoken, then the card shows **Listening, say "confirm"** with a
+   10-second countdown.
+3. Say "confirm": the card clears and the transfer continues. Say "cancel": it shows what it heard and offers
+   **Listen again**; the Confirm button still works.
 
 ---
 

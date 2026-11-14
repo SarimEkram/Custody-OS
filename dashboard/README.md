@@ -48,6 +48,8 @@ real change-stream events (those were sent in with the shapes the backend code p
 | Typed request `POST /transfers`, spoken request `POST /voice/requests` | Works (voice verified at the request-format level) |
 | Read-back card and `POST /transfers/{id}/confirm` | Works. The sentence comes from the event's `text` |
 | Read-back audio (text-to-speech) | Works. Plays the event's `audio_url` (`/api/transfers/{id}/readback/audio`); the text read-back always stands |
+| Speak a request (push-to-talk) | Works. A real browser recording was accepted by the real voice route (speech-to-text faked). Not yet tried with a live ElevenLabs key |
+| Confirm by voice (agent reads aloud, then listens ~10 s for "confirm") | Built and tested against the mock. **Waiting on the backend** (`POST /transfers/{id}/confirm/voice`, issue 4 in `DASHBOARD_BACKEND_ISSUES.md`). Until then the card says it isn't available and the Confirm button is used |
 | Approve / Deny, Stop, Revoke | Work at the route level. Never optimistic: the UI waits for the SSE update |
 | "Did you mean...?" and unclear requests | Work. Uses `problems[].suggestions` and `message`, with a fallback for sparse problems |
 | Live map and courier dot | Works on the outbound and recovery legs, placed from `progress` (see below) |
@@ -61,6 +63,22 @@ real change-stream events (those were sent in with the shapes the backend code p
 | Restore authority | **Waiting on the backend** (`POST /grants/{id}/reissue`) |
 | Original-request audio playback | **Waiting on the backend** (`GET /voice/requests/{id}/audio`) |
 
+## Voice
+
+- **Speaking a request:** hold the mic (or Space) and release to send. Capped at 30 s / 1 MB, like the backend. A transcript with
+  low-confidence words highlighted, "did you mean" suggestions, and the typed box as a fallback.
+- **Confirming by voice:** when a read-back appears the dashboard plays the spoken read-back (`audio_url`), and when it **finishes**
+  opens the microphone for **10 seconds**, stopping early after about 1.2 s of silence following speech. The clip is uploaded to
+  `POST /transfers/{id}/confirm/voice`; the **backend** transcribes it, decides whether it was a confirmation, and records it. The
+  dashboard never decides what was said, and identity is the logged-in user, never the voice.
+- **The Confirm button always works** and wins: pressing it at any time stops listening and releases the microphone.
+- **It says why when it can't:** blocked microphone, nothing heard (a full 10 s of silence is not uploaded), heard something that
+  wasn't a confirmation (shows what it heard, offers *Listen again*), browser blocked autoplay (*tap to start*), no spoken
+  read-back (manual *Say "confirm"* button), or the backend lacks the route (clear message, and it stops retrying this session).
+- **Settings (this browser only):** the on/off switch on the card (`localStorage` key `custody.voiceConfirm`), and the window length
+  `custody.voiceListenSeconds` (3-30, default 10).
+- **Needs** Chrome on `localhost` (microphone and `MediaRecorder`).
+
 ## What the backend still needs to provide
 
 1. **`POST /grants/{id}/reissue`** `{by, reason}`: see `GRANT_REISSUE_SPEC.md` (supervisor only, never the agent, new
@@ -70,6 +88,9 @@ real change-stream events (those were sent in with the shapes the backend code p
    progress}`. After a "back to origin" reroute the courier service reports `from === to` with progress restarting
    at 0. The dashboard copes by remembering where it last drew the courier, but a page reload mid-recovery loses that.
    Adding the leg's start (e.g. `leg_from`) or `x`/`y` to the event would remove the guesswork.
+
+4. **`POST /transfers/{id}/confirm/voice`** (multipart `audio`, `user_id`) and a spoken "say confirm" cue at the end of the read-back
+   text: see issue 4 in `DASHBOARD_BACKEND_ISSUES.md`. The dashboard side is built and waiting.
 
 ## Behaviour the dashboard relies on (already true on `main`)
 
