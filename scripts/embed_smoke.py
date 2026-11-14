@@ -3,6 +3,7 @@
 Usage:  python3 scripts/embed_smoke.py [model]
 Reads VOYAGE_API_KEY / VOYAGE_BASE_URL / VOYAGE_MODEL from .env. Never prints the key.
 """
+
 import json
 import sys
 import urllib.error
@@ -29,11 +30,13 @@ model = sys.argv[1] if len(sys.argv) > 1 else env.get("VOYAGE_MODEL", "voyage-3.
 if not key:
     sys.exit("VOYAGE_API_KEY is empty in .env")
 
-body = json.dumps({
-    "input": ["Agent checked out TS-1042 from FZ-B for jlee under GRANT-0007."],
-    "model": model,
-    "input_type": "document",
-}).encode()
+body = json.dumps(
+    {
+        "input": ["Agent checked out TS-1042 from FZ-B for jlee under GRANT-0007."],
+        "model": model,
+        "input_type": "document",
+    }
+).encode()
 req = urllib.request.Request(
     f"{base}/embeddings",
     data=body,

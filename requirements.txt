@@ -6,3 +6,5 @@ pytest
 pytest-cov
 ruff
 python-multipart
+pymongo
+dnspython
