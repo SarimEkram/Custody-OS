@@ -33,3 +33,37 @@ async def test_human_action_errors_are_clean(client):
     assert (await client.post("/grants/GRANT-NOPE/revoke", json={"by": "user:jlee"})).status_code == 404
     assert (await client.post("/transfers/TR-NOPE/confirm",
                               json={"user_id": "user:jlee", "readback_text": "x"})).status_code == 400
+
+
+# ---- C's dashboard client shapes (dashboard/src/lib/api.ts) must work alongside the original ones
+async def test_dashboard_shaped_bodies_pass_validation(client):
+    # Unknown ids give 400/404/403 (domain errors), never 422 (body didn't validate)
+    cases = [
+        ("/transfers/TR-NOPE/confirm", {"user_id": "user:jlee", "method": "button"}),
+        ("/approvals/APR-NOPE", {"user_id": "user:mokafor", "decision": "approved"}),
+        ("/approvals/APR-NOPE", {"user_id": "user:mokafor", "decision": "denied"}),
+        ("/approvals/APR-NOPE", {"decided_by": "user:mokafor", "approve": True}),
+        ("/grants/GRANT-NOPE/revoke", {"user_id": "user:jlee"}),
+        ("/grants/GRANT-NOPE/revoke", {"by": "user:jlee", "reason": "x"}),
+    ]
+    for path, body in cases:
+        assert (await client.post(path, json=body)).status_code in (400, 403, 404), (path, body)
+    assert (await client.post("/approvals/APR-NOPE", json={"user_id": "user:mokafor"})).status_code == 422
+
+
+async def test_stop_accepts_dashboard_body(client):
+    from agent.db import admin_db
+    r = await client.post("/control/stop", json={"user_id": "user:testapi", "scope": "transfer",
+                                                 "transfer_id": "TR-NOPE-STOP"})
+    assert r.status_code == 200
+    await admin_db().control.delete_many({"issued_by": "user:testapi"})  # admin cleanup of test row
+
+
+async def test_audit_query_has_dashboard_fields(client):
+    r = (await client.post("/audit/query", json={"question": "What happened to TS-1042?", "user_id": "user:jlee"})).json()
+    assert r["route"] == "custody_chain" and r["rows"]  # original fields kept
+    assert r["mode"] == "canned" and r["answer"] and r["entries"]
+    assert all(e["entry_type"] != "scan" for e in r["entries"])
+    r = (await client.post("/audit/query", json={"question": "Show every restricted move without a supervisor"})).json()
+    assert r["route"] == "restricted_without_supervisor" and "0 restricted move" in r["answer"]
+    assert any(e["decision"] in ("deny", "pending_approval") for e in r["entries"])  # beat-2 blocked attempt

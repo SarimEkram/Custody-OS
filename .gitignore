@@ -17,3 +17,6 @@ dist/
 .DS_Store
 .coverage
 .lab_config.json
+
+# private notes
+PERSON_A_PLAN.md
