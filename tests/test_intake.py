@@ -200,3 +200,21 @@ def test_a_rejected_model_call_becomes_a_clarification_not_a_server_error():
 
     with pytest.raises(LLMError):  # a real outage is still reported as an outage
         asyncio.run(llm_parser(Down(), CATALOG)(TEXT))
+
+
+def test_llm_parser_sees_locations_loaded_after_it_was_created():
+    # main.create_app builds the parser with an EMPTY catalog and fills it at startup; the prompt must use
+    # the loaded locations, or the model is told "Locations: ." and cannot map "the Forensics Lab".
+    catalog = Catalog({}, {})
+    seen = {}
+
+    class LLM:
+        async def chat(self, messages, tools):
+            seen["system"] = messages[0]["content"]
+            return {"role": "assistant", "content": None, "tool_calls": None}
+
+    parser = llm_parser(LLM(), catalog)
+    catalog.locations.update({"FOR-LAB": "Forensics Lab"})  # what the service's startup does
+    with pytest.raises(ParseFailed):
+        asyncio.run(parser("Move EV-2201 to the Forensics Lab now."))
+    assert "FOR-LAB = Forensics Lab" in seen["system"]
