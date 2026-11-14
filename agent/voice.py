@@ -9,16 +9,23 @@ is read fully before the check, so put a body-size limit in front of this for a 
 """
 
 import hashlib
+from collections.abc import Awaitable, Callable
 
 import httpx
 
+from agent.confirmation import ConfirmationService, NoPending
 from agent.intake import Intake, NoGrant
 from agent.parse import Catalog
 
 STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
 
 
 class STTError(Exception):
+    pass
+
+
+class TTSError(Exception):
     pass
 
 
@@ -62,6 +69,78 @@ class ElevenLabsSTT:
         if r.status_code != 200:
             raise STTError(f"speech-to-text returned {r.status_code}")
         return r.json()
+
+
+class ElevenLabsTTS:
+    def __init__(
+        self,
+        api_key: str,
+        voice_id: str,
+        model_id: str = "eleven_flash_v2_5",
+        client: httpx.AsyncClient | None = None,
+        timeout: float = 5.0,
+    ) -> None:
+        self.api_key, self.voice_id, self.model_id = api_key, voice_id, model_id
+        self.timeout = timeout
+        self.client = client or httpx.AsyncClient()
+
+    async def synthesize(self, text: str) -> bytes:
+        try:
+            r = await self.client.post(
+                TTS_URL.format(voice_id=self.voice_id),
+                headers={"xi-api-key": self.api_key},
+                json={"text": text, "model_id": self.model_id},
+                timeout=self.timeout,
+            )
+        except httpx.HTTPError as e:
+            raise TTSError(f"text-to-speech request failed: {type(e).__name__}") from e
+        if r.status_code != 200:
+            raise TTSError(f"text-to-speech returned {r.status_code}")
+        return r.content
+
+
+class SpokenPrompts:
+    """Audio for the prompts the tech and the supervisor must answer.
+
+    Callers pass an id, never text: the words come from the pending read-back or a fixed approval
+    template, so what is heard is what will run. Speech is output only and grants no authority.
+
+    shortcut: the audio cache is unbounded; fine while there are only a handful of pending
+    prompts per demo run, cap it before a long-lived deployment.
+    """
+
+    def __init__(
+        self,
+        tts,
+        confirmations: ConfirmationService,
+        get_approval: Callable[[str], Awaitable[dict | None]],
+    ) -> None:
+        self.tts, self.confirmations, self.get_approval = tts, confirmations, get_approval
+        self.cache: dict[str, bytes] = {}
+
+    async def readback(self, transfer_id: str) -> bytes:
+        pending = self.confirmations.pending.get(transfer_id)
+        if not pending:
+            raise NoPending(transfer_id)
+        return await self.speak(pending["text"])
+
+    async def approval(self, approval_id: str) -> bytes:
+        apr = await self.get_approval(approval_id)
+        if apr is None:
+            raise LookupError(approval_id)
+        if apr["status"] != "pending":
+            raise NoPending(approval_id)
+        tool = apr["requested_for_tool"].replace("_", " ")
+        return await self.speak(
+            f"Supervisor approval needed to {tool} sample {apr['sample_id']} for transfer "
+            f"{apr['transfer_id']}. Open the approvals inbox to approve or deny."
+        )
+
+    async def speak(self, text: str) -> bytes:
+        key = hashlib.sha256(text.encode()).hexdigest()
+        if key not in self.cache:
+            self.cache[key] = await self.tts.synthesize(text)
+        return self.cache[key]
 
 
 class MemoryAudio:

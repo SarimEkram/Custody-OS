@@ -32,7 +32,7 @@ from agent.recovery import RecoveryPlanner
 from agent.runner import Runner
 from agent.scripted import ScriptedLLM, rule_parser
 from agent.signals import Signals
-from agent.voice import VoiceIntake
+from agent.voice import SpokenPrompts, VoiceIntake
 
 
 @dataclass
@@ -64,6 +64,8 @@ class Backends:
     wait_timeout: float = 300.0
     low_logprob: float = -1.0
     max_audio_bytes: int = 1_048_576
+    tts: Any = None
+    get_approval: Callable[[str], Awaitable[dict | None]] | None = None
 
 
 @dataclass
@@ -89,9 +91,12 @@ class Service:
 def build_service(b: Backends) -> Service:
     hub, signals, notifications = EventHub(), Signals(), []
     applier = ScanApplier(b.apply_scan)
+    speaks = bool(b.tts and b.get_approval)
     confirmations = ConfirmationService(
-        b.store, b.append, signals, hub.publish, b.catalog, recorder=b.confirm_recorder
-    )
+        b.store, b.append, signals, hub.publish, b.catalog, recorder=b.confirm_recorder,
+        # the dashboard reaches the agent through its /api proxy
+        audio_url=(lambda tid: f"/api/transfers/{tid}/readback/audio") if speaks else None,
+    )  # fmt: skip
 
     async def notify(args: dict, ctx) -> dict:
         notifications.append((args["user_id"], args["message"]))
@@ -119,7 +124,8 @@ def build_service(b: Backends) -> Service:
                     runner.start, b.low_logprob)  # fmt: skip
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
-    app = create_b_routes(intake, voice, confirmations)
+    speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
+    app = create_b_routes(intake, voice, confirmations, speech)
 
     def stream_events() -> AsyncIterator[dict]:
         return merged_stream(b.event_feed(), hub)
@@ -168,7 +174,7 @@ def create_app() -> FastAPI:
         load_catalog,
         load_freezers,
     )
-    from agent.voice import ElevenLabsSTT
+    from agent.voice import ElevenLabsSTT, ElevenLabsTTS
 
     db, env = agent_db(), os.environ
     catalog, freezers = Catalog({}, {}), {}
@@ -201,6 +207,15 @@ def create_app() -> FastAPI:
         stt = ElevenLabsSTT(env["ELEVENLABS_API_KEY"], env.get("ELEVENLABS_STT_MODEL", "scribe_v3"),
                             timeout=float(env.get("STT_TIMEOUT_SECONDS", "5")))  # fmt: skip
 
+    tts = None
+    if env.get("ELEVENLABS_API_KEY") and env.get("ELEVENLABS_TTS_VOICE_ID"):
+        tts = ElevenLabsTTS(env["ELEVENLABS_API_KEY"], env["ELEVENLABS_TTS_VOICE_ID"],
+                            env.get("ELEVENLABS_TTS_MODEL", "eleven_flash_v2_5"),
+                            timeout=float(env.get("TTS_TIMEOUT_SECONDS", "5")))  # fmt: skip
+
+    async def get_approval(approval_id: str) -> dict | None:
+        return await db.approvals.find_one({"_id": approval_id})
+
     service = build_service(Backends(
         store=store, requests=MongoRequests(db), audio=MongoAudio(db), catalog=catalog,
         find_grant=find_grant(db, AGENT_ID), append=ledger.append, execute=policy_gate.execute,
@@ -212,6 +227,7 @@ def create_app() -> FastAPI:
         next_state=custody.NEXT_STATE, verify_timeout=settings.verifier_timeout_seconds,
         low_logprob=float(env.get("LOW_CONFIDENCE_LOGPROB", "-1.0")),
         max_audio_bytes=int(env.get("MAX_AUDIO_BYTES", "1048576")),
+        tts=tts, get_approval=get_approval,
     ))  # fmt: skip
 
     @asynccontextmanager

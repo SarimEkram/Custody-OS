@@ -27,10 +27,27 @@ Lab systems read `.lab_config.json`, never Atlas. Only the scanner holds a DB us
 - **Confirm:** `POST /api/transfers/{id}/confirm {user_id, readback_text, method}` (A's body; B records the
   read-back text it generated, not the one the browser sends, so what was shown is what is logged).
 - **SSE:** `GET /api/stream` merges A's Atlas events with B's:
-  - `{"kind": "confirmation_request", "data": {"id", "transfer_id", "text"}}`: show the read-back card.
+  - `{"kind": "confirmation_request", "data": {"id", "transfer_id", "readback_text", "text", "audio_url"?}}`:
+    show the read-back card. `text` is the same string as `readback_text` (kept for compatibility).
+    `audio_url` is present only when text-to-speech is configured; see "Spoken prompts" below.
   - `{"kind": "courier_position", "data": {"job_id", "transfer_id", "sample_id", "from", "to", "progress"}}`:
     once a second while a courier is moving; in memory only, never written to Atlas.
 - Locations are the seed's ids (`FZ-A`, `SEQ-3`, `FOR-LAB`, `CORR-1`); `progress` runs 0 to 1 from `from` to `to`.
+
+### Spoken prompts (text-to-speech)
+
+The server speaks only what it built itself; the endpoints take an id, never text.
+
+- **Read-back:** `confirmation_request.data.audio_url` (`/api/transfers/{id}/readback/audio`) is an
+  `audio/mpeg` URL, so `new Audio(url).play()` works as is (`ReadbackCard` already does this on a click).
+  Browsers block autoplay until the page has had a click or key press, so call `play()` after a user
+  gesture (for example the mic press) and catch the rejection. 409 = nothing pending any more.
+- **Approval:** no event carries a URL; build `/api/approvals/{approval_id}/audio` from the `approval`
+  event's `_id` while its `status` is `pending`. 404 = unknown id, 409 = already decided.
+- **Failure:** 503 from either route (no key, timeout, ElevenLabs error) means show the text only. Never
+  block a button on audio. If `audio_url` is absent, TTS is off: hide the replay button.
+- Suggested UI: speak on arrival, a replay button, a mute toggle kept in `localStorage`. Speech grants no
+  authority; confirming and approving work exactly as before.
 
 ## For A
 
@@ -65,4 +82,4 @@ lists the ones it cannot place.
 
 - The requested window stays text ("2 PM"); nothing schedules by time yet.
 - No resume token on the scan feed or crash-resume of an interrupted transfer (stretch items).
-- Text-to-speech read-backs not built (stretch). Groq's free tier is rate-limited (~30 req/min, 8k tokens/min).
+- Text-to-speech prompts are built (see ARCHITECTURE.md, "Spoken prompts"); the dashboard side is C's. Groq's free tier is rate-limited (~30 req/min, 8k tokens/min).

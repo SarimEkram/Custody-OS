@@ -64,7 +64,18 @@ def test_request_publishes_the_readback_for_the_dashboard():
     out = run(svc.request("TR-1", eta_minutes=4))
     assert out["confirmation_request_id"] == "CONF-1" and out["readback_text"].endswith("Confirm?")
     assert events == [{"kind": "confirmation_request", "data": {
-        "id": "CONF-1", "transfer_id": "TR-1", "text": out["readback_text"]}}]  # fmt: skip
+        "id": "CONF-1", "transfer_id": "TR-1", "text": out["readback_text"],
+        "readback_text": out["readback_text"]}}]  # fmt: skip
+
+
+def test_request_carries_an_audio_url_only_when_speech_is_configured():
+    events = []
+    store = MemoryCustodyStore({}, {"TR-1": dict(TRANSFER)})
+    url = lambda tid: f"/api/transfers/{tid}/readback/audio"  # noqa: E731
+    svc = ConfirmationService(store, Ledger().append, Signals(), events.append, CATALOG,
+                              clock=lambda: NOW, audio_url=url)  # fmt: skip
+    run(svc.request("TR-1", eta_minutes=4))
+    assert events[0]["data"]["audio_url"] == "/api/transfers/TR-1/readback/audio"
 
 
 def test_confirm_by_the_requester_logs_it_flags_the_transfer_and_wakes_the_agent():

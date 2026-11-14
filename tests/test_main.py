@@ -82,6 +82,21 @@ def test_voice_route_exists_only_when_speech_to_text_is_configured():
     assert "/voice/requests" in paths(with_stt.app)
 
 
+def test_audio_routes_exist_only_when_text_to_speech_is_configured():
+    without = paths(build_service(backends()[0]).app)
+    assert "/transfers/{transfer_id}/readback/audio" not in without
+    configured = backends(tts=object(), get_approval=noop)[0]
+    with_tts = paths(build_service(configured).app)
+    assert "/transfers/{transfer_id}/readback/audio" in with_tts
+    assert "/approvals/{approval_id}/audio" in with_tts
+
+
+def test_the_published_readback_points_at_the_audio_route_only_with_text_to_speech():
+    assert build_service(backends()[0]).confirmations.audio_url is None
+    configured = build_service(backends(tts=object(), get_approval=noop)[0])
+    assert configured.confirmations.audio_url("TR-1") == "/api/transfers/TR-1/readback/audio"
+
+
 def test_b_owns_the_stream_route_so_confirmation_and_courier_events_reach_the_dashboard():
     service = build_service(backends()[0])
     with TestClient(service.app).stream("GET", "/stream") as r:
