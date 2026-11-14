@@ -20,12 +20,11 @@ Who is waiting on whom. Remove a line once it's resolved.
 
 | Waiting | On | For what |
 |---|---|---|
-| A | B | Real agent loop calling `policy_gate.execute()`, to test the gate end to end. **Built on B's branch; waiting on B to merge it to `main`** |
 | A | B | Groq API key, to test the auditor's LLM routing. **B has it in B's `.env`; B sends it to A privately (never through git)** |
 | A | B + C | Running services and dashboard, to rehearse demo beats 1–3 |
 | A | C | Auditor panel calling `/api/audit/*`, to check the results look right on screen |
 | B | A + C | Agree a time for the first live end-to-end run (it needs `python -m db.seed --reset`, which resets everyone's data) |
-| B | C | Seed fix: `identities` scanner readers have `location_id` typos (`FZA`, `SEQ3`…; should be `FZ-A`, `SEQ-3`…). B works around it in `services/config.py`; fix the seed. Also agree `DEMO_SPEED` |
+| B | C | Agree `DEMO_SPEED`, and point the dashboard at the real agent (it currently runs against `mock-data/server.mjs`) |
 
 ---
 
@@ -53,7 +52,7 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [ ] Narrow `admin_svc` from Atlas admin to `readWrite` + `dbAdmin` on `custody`
 - [ ] Install `mongosh`, rehearse beat 4 ("not authorized" / "failed validation")
 - [ ] Test auditor LLM routing (blocked: B, needs the Groq key)
-- [ ] Gate + verifier end to end with the real agent (blocked: B, needs the agent loop on `execute()`)
+- [ ] Gate + verifier end to end with the real agent (B's agent loop is on `main` now; needs a live run)
 - [ ] Rehearse beats 1–3 with the full system (blocked: B + C)
 - [ ] Check auditor results in the dashboard (blocked: C, needs the auditor panel)
 
@@ -65,7 +64,7 @@ Who is waiting on whom. Remove a line once it's resolved.
 
 ## Person B: agent and fake lab
 
-**Status:** all of B's list is built and tested on branch `person-b/agent-and-services` (264 unit tests; live checks passed: Groq tool call, ElevenLabs transcript, Atlas stores / transaction / change stream, and the real agent service boots against Atlas). **It is not on `main` yet**, and it has **not been run end to end with A's real gate on Atlas**. Run instructions and the contracts for A and C are in `HANDOFF_B.md` (on the branch).
+**Status:** all of B's list is built and tested (264 unit tests; live checks passed: Groq tool call, ElevenLabs transcript, Atlas stores / transaction / change stream, and the real agent service boots against Atlas). **Merged to `main`** (PR #1), along with C's dashboard (`3ef3450`). It has **not been run end to end with A's real gate on Atlas**, and the dashboard has not been run against the real agent yet. Run instructions and the contracts for A and C are in `HANDOFF_B.md`.
 
 **Done**
 - [x] Mock services: freezer, scheduler, courier, station (ports 8101–8104); they start from `.lab_config.json`, exported from the seeded Atlas data (`scripts/export_lab_config.py`), so they hold no DB credentials
@@ -85,9 +84,11 @@ Who is waiting on whom. Remove a line once it's resolved.
 - [x] `DEMO_SCRIPTED=1` replay mode (the mechanism; the script itself is still to be recorded, see below)
 - [x] Courier position and `confirmation_request` events on `/api/stream` (merged with A's feed)
 - [x] Atlas-backed stores (transfers, samples, voice requests, GridFS audio, grants, catalog) and `HANDOFF_B.md`
+- [x] Merge `person-b/agent-and-services` into `main` (PR #1: agent/, services/, scripts/, `HANDOFF_B.md`)
+- [x] Seed fix: scanner readers now point at real location ids (was `FZA`, `SEQ3`…)
 
 **To do**
-- [ ] Merge `person-b/agent-and-services` into `main` (agent/, services/, scripts/, `HANDOFF_B.md`)
+- [ ] Merge `origin/main` (C's dashboard) into `feature/tts-spoken-prompts`, then open the PR for it
 - [ ] First live end-to-end run of beats 1–3 with A's gate on Atlas (needs `python -m db.seed --reset`; agree a time first)
 - [ ] Record `demo/script.json` from a good live run, so `DEMO_SCRIPTED=1` has something to replay
 - [ ] Agree `DEMO_SPEED` with C (FZ-A ↔ SEQ-3 is 2 min; TS-1077's limit is 3 min)
@@ -104,49 +105,8 @@ Done (backend, 279 unit tests pass, ruff clean; TTS is unit-tested against a moc
 Still to do:
 - [ ] Live check with the real key and voice id (the voice id is now in `.env`): start the agent, trigger a read-back, `GET` the audio route and play the MP3. Not yet confirmed that the key's TTS permission works.
 - [ ] Walk demo beat 1 after `scripts/reset_demo.sh` (the audio routes are additive, but this hasn't been run)
-- [ ] Dashboard playback (play on `confirmation_request` / pending approval, replay button, mute toggle): **deferred until the frontend branch is merged**, then it lands in C's `ReadbackCard` and `ApprovalInbox`. Nothing started.
+- [ ] Dashboard playback (play on `confirmation_request` / pending approval, replay button, mute toggle): the frontend is on `main` now, so this is unblocked: it lands in C's `ReadbackCard` (`dashboard/src/components/command/`) and `ApprovalInbox` (`dashboard/src/components/approvals/`). Agree with C who writes it. Nothing started.
 - [ ] Optional: ledger entry when a prompt is spoken (what the tech heard), and a cap on the audio cache
-
-**Stretch (only after the demo works)**
-- [ ] Gate-signed token that lab services verify
-- [ ] Save change-stream resume tokens in a `stream_state` collection
-
----
-
-## Person B: agent and fake lab
-
-**Status:** all of B's list is built and tested on branch `person-b/agent-and-services` (264 unit tests; live checks passed: Groq tool call, ElevenLabs transcript, Atlas stores / transaction / change stream, and the real agent service boots against Atlas). **It is not on `main` yet**, and it has **not been run end to end with A's real gate on Atlas**. Run instructions and the contracts for A and C are in `HANDOFF_B.md` (on the branch).
-
-**Done**
-- [x] Mock services: freezer, scheduler, courier, station (ports 8101–8104); they start from `.lab_config.json`, exported from the seeded Atlas data (`scripts/export_lab_config.py`), so they hold no DB credentials
-- [x] Scanner service (8105): signs scans with `agent.signing.sign_scan`, inserts as `scanner_svc`
-- [x] `scripts/stt_smoke.py`: one ElevenLabs test call (PASS, `scribe_v3`)
-- [x] `scripts/llm_smoke.py`: one Groq tool-call test (PASS, `openai/gpt-oss-120b`)
-- [x] Typed request path `POST /transfers` (creates transfer + `intake` ledger row)
-- [x] Agent loop: every tool call through `policy_gate.execute()` (`agent/atlas.py`, `agent/loop.py`)
-- [x] Executor: tool → lab service HTTP call with `X-Correlation-Id` (`agent/lab.py`)
-- [x] Mount `agent.api.router`; start `Watchers` on startup (`agent/main.py`)
-- [x] Verifier: `on_scan` → `custody.apply_verified_scan()` (`ScanApplier`; the loop waits for the applied result)
-- [x] Voice intake `POST /voice/requests`: ElevenLabs STT, GridFS, `voice_requests`
-- [x] `parse_request` with DB validation and "did you mean" for low confidence
-- [x] `request_confirmation` tool + read-back text (generated by code from the validated transfer)
-- [x] Handle `PENDING_APPROVAL` (wait, then retry) and `HALTED` (exit loop; the run is cancelled even mid-tool)
-- [x] Recovery planner: compensate reversible steps, `return_to_storage` for irreversible
-- [x] `DEMO_SCRIPTED=1` replay mode (the mechanism; the script itself is still to be recorded, see below)
-- [x] Courier position and `confirmation_request` events on `/api/stream` (merged with A's feed)
-- [x] Atlas-backed stores (transfers, samples, voice requests, GridFS audio, grants, catalog) and `HANDOFF_B.md`
-
-**To do**
-- [ ] Merge `person-b/agent-and-services` into `main` (agent/, services/, scripts/, `HANDOFF_B.md`)
-- [ ] First live end-to-end run of beats 1–3 with A's gate on Atlas (needs `python -m db.seed --reset`; agree a time first)
-- [ ] Record `demo/script.json` from a good live run, so `DEMO_SCRIPTED=1` has something to replay
-- [ ] Agree `DEMO_SPEED` with C (FZ-A ↔ SEQ-3 is 2 min; TS-1077's limit is 3 min)
-- [ ] Rehearse beats 1–3 with the full system (blocked: A + C)
-
-**Spoken prompts (branch `feature/tts-spoken-prompts`)**
-- [x] `ElevenLabsTTS` in `agent/voice.py` + `ELEVENLABS_TTS_*` env wiring in `agent/main.py`
-- [x] `GET /transfers/{id}/readback/audio` and `GET /approvals/{id}/audio` (id only, server-built text, cached, 503 on TTS failure)
-- [ ] Dashboard: play on `confirmation_request` / pending approval, replay button, mute toggle
 
 **Stretch (only after the demo works)**
 - [ ] Crash-resume of an interrupted transfer; resume token for the scan feed
