@@ -162,3 +162,67 @@ def test_return_to_storage_before_pickup_just_checks_the_sample_back_in():
 
     run(go())
     assert [s["type"] for s in scans] == ["checkout", "checkin"] and not lab.slept
+
+
+# ------------------------------------------------- a sleeping free-tier host must not end the run
+def freezer_answering(*answers, wake_timeout=60.0):
+    """A LabClient whose freezer replies with `answers` in order (a Response, or an exception)."""
+    calls, slept = [], []
+
+    def handler(request):
+        a = answers[min(len(calls), len(answers) - 1)]
+        calls.append(request.url.path)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    async def sleep(s):
+        slept.append(s)
+
+    def client():
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://lab")
+
+    lab = LabClient(client(), client(), client(), client(), sleep=sleep,
+                    wake_timeout=wake_timeout, wake_pause=3.0)  # fmt: skip
+    return lab, calls, slept
+
+
+def lookup(lab):
+    return asyncio.run(lab.call("lookup_sample", {"sample_id": "TS-1042"}, "c-1", {}))
+
+
+BOOTING = httpx.Response(503, text="<html>Service waking up</html>")
+FOUND = httpx.Response(200, json={"sample_id": "TS-1042", "location_id": "FZ-B"})
+
+
+def test_a_waking_host_is_waited_out_then_the_call_succeeds():
+    lab, calls, slept = freezer_answering(BOOTING, BOOTING, FOUND)
+    assert lookup(lab)["location_id"] == "FZ-B"
+    assert len(calls) == 3 and slept == [3.0, 3.0]
+
+
+def test_a_refused_connection_while_booting_is_also_waited_out():
+    lab, calls, _ = freezer_answering(httpx.ConnectError("refused"), FOUND)
+    assert lookup(lab)["location_id"] == "FZ-B" and len(calls) == 2
+
+
+def test_a_host_that_never_wakes_is_a_clean_lab_error_not_a_json_crash():
+    lab, calls, _ = freezer_answering(httpx.Response(502, text="<html>Bad Gateway</html>"),
+                                      wake_timeout=9.0)  # fmt: skip
+    with pytest.raises(LabError) as e:
+        lookup(lab)
+    assert e.value.status_code == 502 and "Bad Gateway" in e.value.detail and len(calls) == 4
+
+
+def test_a_gateway_timeout_is_never_resent_because_the_service_may_have_acted():
+    lab, calls, _ = freezer_answering(httpx.Response(504, text="timeout"), FOUND)
+    with pytest.raises(LabError):
+        lookup(lab)
+    assert len(calls) == 1
+
+
+def test_a_non_json_error_body_is_reported_as_text():
+    lab, _, _ = freezer_answering(httpx.Response(500, text="Internal Server Error"))
+    with pytest.raises(LabError) as e:
+        lookup(lab)
+    assert e.value.status_code == 500 and e.value.detail == "Internal Server Error"

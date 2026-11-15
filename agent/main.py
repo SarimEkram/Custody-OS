@@ -207,7 +207,8 @@ def create_app() -> FastAPI:
     async def wake() -> None:
         async with httpx.AsyncClient(timeout=lab_timeout) as c:
             await asyncio.gather(*(c.get(u) for u in lab_urls), return_exceptions=True)
-    lab = LabClient(**lab_clients, poll=float(env.get("COURIER_POLL_SECONDS", "0.5")))
+    lab = LabClient(**lab_clients, poll=float(env.get("COURIER_POLL_SECONDS", "0.5")),
+                    wake_timeout=lab_timeout)  # fmt: skip
 
     if env.get("DEMO_SCRIPTED") == "1":
         llm, parser = (
