@@ -89,25 +89,77 @@ def test_config_survives_a_json_round_trip(tmp_path):
     assert again.inventory == cfg().inventory and again.sample_ids == cfg().sample_ids
 
 
-def test_http_emit_posts_the_raw_scan_to_the_scanner_and_raises_on_refusal():
+def _emit(handler, **kw):
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return http_emit("http://scanner:8105", client=client, pause=0, run=lambda job: job(), **kw)
+
+
+def test_http_emit_posts_the_raw_scan_to_the_scanner():
     seen = []
 
     def handler(request):
         seen.append((str(request.url), json.loads(request.content)))
-        return httpx.Response(201 if request.url.path == "/scan" else 404, json={})
+        return httpx.Response(201, json={})
 
-    emit = http_emit(
-        "http://scanner:8105", client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    emit({"reader_id": "r", "type": "checkout"})
+    _emit(handler)({"reader_id": "r", "type": "checkout"})
     assert seen == [("http://scanner:8105/scan", {"reader_id": "r", "type": "checkout"})]
 
-    refuse = http_emit(
-        "http://scanner:8105",
-        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(422, json={}))),
-    )
-    with pytest.raises(httpx.HTTPStatusError):
-        refuse({"x": 1})
+
+def test_http_emit_runs_in_the_background_so_the_lab_call_never_waits():
+    jobs = []
+    emit = http_emit("http://scanner:8105", run=jobs.append)
+    emit({"type": "checkout"})  # returns at once: nothing is sent until the job runs
+    assert len(jobs) == 1
+
+
+def test_a_refused_scan_is_logged_not_raised_or_resent(caplog):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(422, json={})
+
+    _emit(handler)({"type": "checkout", "sample_id": "TS-1042"})
+    assert len(calls) == 1 and "refused" in caplog.text
+
+
+@pytest.mark.parametrize("first", ["503", "no_connection"])
+def test_a_sleeping_scanner_still_gets_the_scan(first):
+    # Render's proxy answers 503 (or the connection fails) while a free-tier scanner wakes
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            if first == "503":
+                return httpx.Response(503)
+            raise httpx.ConnectError("waking up")
+        return httpx.Response(201, json={})
+
+    _emit(handler)({"type": "checkout"})
+    assert len(calls) == 2
+
+
+def test_a_scan_that_may_have_arrived_is_never_sent_twice():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        raise httpx.ReadTimeout("no answer")
+
+    _emit(handler)({"type": "checkout"})
+    assert len(calls) == 1
+
+
+def test_a_scanner_down_for_good_gives_up_after_its_patience(caplog):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(503)
+
+    _emit(handler, patience=0)({"type": "checkout", "sample_id": "TS-1042"})
+    assert len(calls) == 1 and "lost" in caplog.text
     assert asyncio  # keep the import used for the async helper below
 
 

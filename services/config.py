@@ -11,11 +11,16 @@ itself used to produce such ids; that is fixed in `db/seed.py`.)
 """
 
 import json
+import logging
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
+
+log = logging.getLogger("lab.scanner_emit")
 
 
 @dataclass
@@ -94,11 +99,48 @@ async def export_lab_config(db) -> LabConfig:
     )
 
 
-def http_emit(scanner_url: str, client: httpx.Client | None = None) -> Callable[[dict], None]:
-    """What a lab system calls when something physical happens: post a raw scan to the scanner."""
-    http = client or httpx.Client(timeout=5.0)
+def _in_background(job: Callable[[], None]) -> None:
+    threading.Thread(target=job, daemon=True).start()
+
+
+def http_emit(
+    scanner_url: str,
+    client: httpx.Client | None = None,
+    patience: float = 120.0,
+    pause: float = 3.0,
+    run: Callable[[Callable[[], None]], None] = _in_background,
+) -> Callable[[dict], None]:
+    """What a lab system calls when something physical happens: post a raw scan to the scanner.
+
+    Delivered in the background, like a reader that holds its scan until the scanner answers: the
+    lab call never waits on it, and a scanner that is asleep (a free-tier host takes ~30 s to wake)
+    still gets the scan. Only failures where the scan cannot have arrived are retried (no
+    connection, or the host's proxy answering 502-504), so a retry never records a scan twice.
+    """
+    http = client or httpx.Client(timeout=60.0)  # one attempt outlasts a cold start
+    url = f"{scanner_url.rstrip('/')}/scan"
+
+    def deliver(scan: dict) -> None:
+        what = f"{scan.get('type')} scan of {scan.get('sample_id')}"
+        end = time.monotonic() + patience
+        while True:
+            try:
+                r = http.post(url, json=scan)
+                if r.status_code not in (502, 503, 504):
+                    if r.is_error:
+                        log.warning("scanner refused the %s: HTTP %s", what, r.status_code)
+                    return
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                pass  # never reached the scanner: safe to send again
+            except httpx.HTTPError as e:  # it may have arrived (e.g. read timeout): don't resend
+                log.warning("%s may not have reached the scanner: %s", what, e)
+                return
+            if time.monotonic() >= end:
+                log.warning("%s lost: scanner unreachable for %ss", what, patience)
+                return
+            time.sleep(pause)
 
     def emit(scan: dict) -> None:
-        http.post(f"{scanner_url.rstrip('/')}/scan", json=scan).raise_for_status()
+        run(lambda: deliver(scan))
 
     return emit

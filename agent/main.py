@@ -67,6 +67,7 @@ class Backends:
     low_logprob: float = -1.0
     max_audio_bytes: int = 1_048_576
     tts: Any = None
+    wake: Callable[[], Awaitable[None]] | None = None  # touch every lab service (free hosts sleep)
     get_approval: Callable[[str], Awaitable[dict | None]] | None = None
 
 
@@ -126,8 +127,17 @@ def build_service(b: Backends) -> Service:
         applier.bus, log_exposure=False,  # custody.apply_verified_scan writes exposure rows
     )  # fmt: skip
     runner = Runner(loop, planner, b.store, b.requests)
+    waking: set[asyncio.Task] = set()
+
+    def start_run(transfer_id: str) -> asyncio.Task:
+        if b.wake:  # sleeping free-tier lab hosts start waking now, in parallel with the run
+            task = asyncio.get_running_loop().create_task(b.wake())
+            waking.add(task)
+            task.add_done_callback(waking.discard)
+        return runner.start(transfer_id)
+
     intake = Intake(b.parser, b.catalog, b.find_grant, b.requests, b.store, b.append,
-                    runner.start, b.low_logprob)  # fmt: skip
+                    start_run, b.low_logprob)  # fmt: skip
     voice = VoiceIntake(b.stt, b.audio, intake, b.catalog, b.max_audio_bytes) if b.stt else None
 
     speech = SpokenPrompts(b.tts, confirmations, b.get_approval) if speaks else None
@@ -187,8 +197,16 @@ def create_app() -> FastAPI:
     db, env = agent_db(), os.environ
     catalog, freezers = Catalog({}, {}), {}
     store = MongoCustodyStore(agent_client(), db)
-    lab_clients = {n: httpx.AsyncClient(base_url=env[f"{n.upper()}_URL"], timeout=15.0)
+    # 15 s locally; on a free host set LAB_TIMEOUT_SECONDS=60 so a call can outlast a cold start.
+    lab_timeout = float(env.get("LAB_TIMEOUT_SECONDS", "15"))
+    lab_clients = {n: httpx.AsyncClient(base_url=env[f"{n.upper()}_URL"], timeout=lab_timeout)
                    for n in ("freezer", "scheduler", "courier", "station")}  # fmt: skip
+    lab_urls = [env[f"{n.upper()}_URL"] for n in ("freezer", "scheduler", "courier", "station",
+                                                  "scanner")]  # fmt: skip
+
+    async def wake() -> None:
+        async with httpx.AsyncClient(timeout=lab_timeout) as c:
+            await asyncio.gather(*(c.get(u) for u in lab_urls), return_exceptions=True)
     lab = LabClient(**lab_clients, poll=float(env.get("COURIER_POLL_SECONDS", "0.5")))
 
     if env.get("DEMO_SCRIPTED") == "1":
@@ -227,7 +245,7 @@ def create_app() -> FastAPI:
     service = build_service(Backends(
         store=store, requests=MongoRequests(db), audio=MongoAudio(db), catalog=catalog,
         find_grant=find_grant(db, AGENT_ID), append=ledger.append, execute=policy_gate.execute,
-        lab=lab, llm=llm, parser=parser, stt=stt, router=atlas_api.router,
+        lab=lab, llm=llm, parser=parser, stt=stt, router=atlas_api.router, wake=wake,
         event_feed=watchers.event_feed, apply_scan=custody.apply_verified_scan,
         confirm_recorder=policy_gate.confirm_readback,
         record_unverified=custody.record_unverified, read_outcomes=read_outcomes,

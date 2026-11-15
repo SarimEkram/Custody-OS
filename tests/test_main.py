@@ -178,3 +178,21 @@ def test_a_typed_request_flows_to_a_transfer_with_the_scripted_parser():
         "text": "Move TS-1042 from Freezer B to Sequencing Station 3 for 2 PM."})  # fmt: skip
     assert r.status_code == 201 and r.json()["transfer_id"] == "TR-0001"
     assert isinstance(service.hub, EventHub)
+
+
+def test_a_new_request_starts_waking_every_lab_service():
+    # free-tier hosts sleep when idle: the run must not be the first thing to knock on each one
+    woke = []
+
+    async def wake():
+        woke.append(1)
+
+    service = build_service(backends(wake=wake)[0])
+    service.runner.start = lambda transfer_id: transfer_id
+
+    async def go():
+        assert service.intake.start_run("TR-1") == "TR-1"
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    assert woke == [1]
