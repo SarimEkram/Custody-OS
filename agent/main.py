@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from agent import guardrails
@@ -262,4 +263,10 @@ def create_app() -> FastAPI:
                 await client.aclose()
 
     service.app.router.lifespan_context = lifespan
+    # A deployed dashboard on another origin calls the agent directly (a Render static-site rewrite
+    # buffers the SSE stream), so allow just those origins. Unset locally, where Vite proxies /api.
+    if origins := [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]:
+        service.app.add_middleware(
+            CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"]
+        )
     return service.app
